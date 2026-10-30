@@ -47,8 +47,8 @@ spec:
     spec:
       project: default
       sources:
-        - repoURL: https://github.com/kahowell/ai-grid-tenant.git
-          targetRevision: HEAD
+        - repoURL: https://github.com/sjug/ai-grid-tenant.git
+          targetRevision: main
           ref: values
         # Temporary v0.3.0-rc.2 schemas until the RHOAI manifest bundle catches up.
         # The overlay hands CRD management to Argo and protects them from pruning.
@@ -79,16 +79,18 @@ spec:
               # OSD ships these namespaces; a self-managed spoke has no creator.
               - name: operator.rhoai.olm.createNamespace
                 value: '{{ ne (index .metadata.labels "local-cluster") "true" | toString }}'
+              # A self-managed hub has no openshift-operators-redhat either, so the
+              # chart creates it everywhere (OSD shipped it on the lab's hub).
               - name: dependencies.loki.olm.createNamespace
-                value: '{{ ne (index .metadata.labels "local-cluster") "true" | toString }}'
+                value: 'true'
         # The enrollment service runs on the hub, so a managed cluster excludes these.
-        - repoURL: https://github.com/kahowell/ai-grid-tenant.git
-          targetRevision: HEAD
+        - repoURL: https://github.com/sjug/ai-grid-tenant.git
+          targetRevision: main
           path: apps/rhoai/local-cluster
           directory:
             exclude: '{{ if eq (index .metadata.labels "local-cluster") "true" }}{{ else }}*{{ end }}'
-        - repoURL: https://github.com/kahowell/ai-grid-tenant.git
-          targetRevision: HEAD
+        - repoURL: https://github.com/sjug/ai-grid-tenant.git
+          targetRevision: main
           path: apps/rhoai/catalog
           helm:
             releaseName: rhoai-nightly-catalog

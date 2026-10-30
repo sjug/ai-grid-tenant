@@ -16,7 +16,7 @@ metadata:
 spec:
   description: Models from the catalog repository, written by the provider console
   sourceRepos:
-    - https://github.com/ai-grid-cloud/ai-grid-1-catalog.git
+    - https://github.com/sjug/ai-grid-catalog.git
   destinations:
     - server: "*"
       namespace: ai-grid-internal-models
@@ -35,7 +35,7 @@ metadata:
 spec:
   description: Models' MaaS entries and subscriptions from the catalog repository, written by the provider console
   sourceRepos:
-    - https://github.com/ai-grid-cloud/ai-grid-1-catalog.git
+    - https://github.com/sjug/ai-grid-catalog.git
   destinations:
     - server: "*"
       namespace: models-as-a-service

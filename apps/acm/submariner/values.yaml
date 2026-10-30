@@ -2,7 +2,9 @@
 clusterName: ""
 # -- Namespace where the Submariner operator is installed.
 installNamespace: submariner-operator
-# -- Use a load-balancer Service for the Submariner gateways.
-loadBalancerEnable: true
+# -- Use a load-balancer Service for the Submariner gateways. Bare metal has
+# no cloud load balancer, so the gateways use node ports on the worker nodes'
+# own addresses instead.
+loadBalancerEnable: false
 # -- Number of gateway replicas.
 gateways: 2

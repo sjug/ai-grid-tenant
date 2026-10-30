@@ -6,8 +6,8 @@ metadata:
 spec:
   project: default
   sources:
-    - repoURL: https://github.com/kahowell/ai-grid-tenant.git
-      targetRevision: HEAD
+    - repoURL: https://github.com/sjug/ai-grid-tenant.git
+      targetRevision: main
       ref: values
     - repoURL: https://github.com/opendatahub-io/odh-gitops.git
       targetRevision: feature-ai-grid
@@ -16,8 +16,8 @@ spec:
         releaseName: grid-bootstrap
         valueFiles:
           - $values/apps/grid-bootstrap/values.yaml
-    - repoURL: https://github.com/kahowell/ai-grid-tenant.git
-      targetRevision: HEAD
+    - repoURL: https://github.com/sjug/ai-grid-tenant.git
+      targetRevision: main
       path: apps/grid-bootstrap/policies
   destination:
     server: https://kubernetes.default.svc

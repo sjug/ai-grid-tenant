@@ -60,5 +60,11 @@ networkPolicy:
     - namespaceSelector:
         matchLabels:
           network.openshift.io/policy-group: ingress
+    # The three cloud69 machine networks: hub, spoke-a, spoke-b. A peer's request
+    # is seen from the node that received it, so the local network must be here.
     - ipBlock:
-        cidr: 10.0.0.0/16
+        cidr: 198.18.0.0/22
+    - ipBlock:
+        cidr: 198.18.4.0/22
+    - ipBlock:
+        cidr: 198.18.8.0/22

@@ -1,0 +1,8 @@
+# -- Address range for the site's L2 pool, e.g. 198.18.1.10-198.18.1.50. Set per
+# cluster by the metallb ApplicationSet from the ai-grid/metallb-pool label.
+pool:
+  range: ""
+  name: ai-grid
+operator:
+  channel: stable
+  source: redhat-operators

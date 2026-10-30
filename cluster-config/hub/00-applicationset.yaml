@@ -21,8 +21,8 @@ spec:
     spec:
       project: default
       sources:
-        - repoURL: https://github.com/kahowell/ai-grid-tenant.git
-          targetRevision: HEAD
+        - repoURL: https://github.com/sjug/ai-grid-tenant.git
+          targetRevision: main
           path: cluster-config/chart
           helm:
             releaseName: cluster-admins
@@ -31,8 +31,8 @@ spec:
             parameters:
               - name: hubResources.enabled
                 value: '{{ eq .name "local-cluster" | toString }}'
-        - repoURL: https://github.com/kahowell/ai-grid-tenant.git
-          targetRevision: HEAD
+        - repoURL: https://github.com/sjug/ai-grid-tenant.git
+          targetRevision: main
           ref: values
       destination:
         server: '{{ if eq .name "local-cluster" }}https://kubernetes.default.svc{{ else }}{{ .server }}{{ end }}'

@@ -1,0 +1,53 @@
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  # MetalLB and one L2 pool on every managed cluster labelled ai-grid/metallb-pool.
+  name: metallb
+  namespace: openshift-gitops
+spec:
+  goTemplate: true
+  goTemplateOptions: ["missingkey=error"]
+  syncPolicy:
+    applicationsSync: sync
+    preserveResourcesOnDeletion: true
+  generators:
+    - clusters:
+        selector:
+          matchLabels:
+            apps.open-cluster-management.io/acm-cluster: "true"
+          matchExpressions:
+            - key: ai-grid/metallb-pool
+              operator: Exists
+  template:
+    metadata:
+      name: 'metallb-{{ .name | trunc 40 }}-{{ sha256sum .name | trunc 8 }}'
+      namespace: openshift-gitops
+    spec:
+      project: default
+      source:
+        repoURL: https://github.com/sjug/ai-grid-tenant.git
+        targetRevision: main
+        path: apps/metallb/chart
+        helm:
+          releaseName: metallb
+          parameters:
+            - name: pool.range
+              value: '{{ index .metadata.labels "ai-grid/metallb-pool" }}'
+      # The hub through Argo's in-cluster server, as the other ApplicationSets do.
+      destination:
+        server: '{{ if eq (index .metadata.labels "local-cluster") "true" }}https://kubernetes.default.svc{{ else }}{{ .server }}{{ end }}'
+        namespace: metallb-system
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+        retry:
+          refresh: true
+          limit: 20
+          backoff:
+            duration: 30s
+            factor: 2
+            maxDuration: 10m
+        syncOptions:
+          - ServerSideApply=true
+          - SkipDryRunOnMissingResource=true

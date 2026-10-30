@@ -49,15 +49,15 @@ spec:
             # ai-grid-backend-git, never in git; keep it scoped to this
             # repository alone.
             git:
-              url: https://github.com/ai-grid-cloud/ai-grid-1-catalog.git
+              url: https://github.com/sjug/ai-grid-catalog.git
               branch: main
               # Where the backend writes models. The catalog's delivery, its
               # AppProject and its status Policy all assume this namespace,
               # which rhoai-prerequisites' Policy creates.
               modelsNamespace: ai-grid-internal-models
     # What the chart doesn't hold: ACM Search access for the backend.
-    - repoURL: https://github.com/kahowell/ai-grid-tenant.git
-      targetRevision: HEAD
+    - repoURL: https://github.com/sjug/ai-grid-tenant.git
+      targetRevision: main
       path: apps/console/manifests
   destination:
     server: https://kubernetes.default.svc

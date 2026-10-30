@@ -13,8 +13,8 @@ spec:
     preserveResourcesOnDeletion: false
   generators:
     - git:
-        repoURL: https://github.com/kahowell/ai-grid-tenant.git
-        revision: HEAD
+        repoURL: https://github.com/sjug/ai-grid-tenant.git
+        revision: main
         files:
           - path: apps/acm/application.yaml
           - path: apps/acm-models/application.yaml

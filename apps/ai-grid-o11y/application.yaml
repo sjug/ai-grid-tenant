@@ -6,8 +6,8 @@ metadata:
 spec:
   project: default
   source:
-    repoURL: https://github.com/kahowell/ai-grid-tenant.git
-    targetRevision: HEAD
+    repoURL: https://github.com/sjug/ai-grid-tenant.git
+    targetRevision: main
     path: apps/ai-grid-o11y/manifests
   destination:
     server: https://kubernetes.default.svc

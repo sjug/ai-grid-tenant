@@ -55,8 +55,8 @@ spec:
     spec:
       project: default
       source:
-        repoURL: https://github.com/kahowell/ai-grid-tenant.git
-        targetRevision: HEAD
+        repoURL: https://github.com/sjug/ai-grid-tenant.git
+        targetRevision: main
         path: '{{ .path }}'
       destination:
         server: '{{ .server }}'

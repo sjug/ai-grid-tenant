@@ -11,8 +11,8 @@ spec:
     preserveResourcesOnDeletion: false
   generators:
     - git:
-        repoURL: https://github.com/kahowell/ai-grid-tenant.git
-        revision: HEAD
+        repoURL: https://github.com/sjug/ai-grid-tenant.git
+        revision: main
         files:
           - path: apps/*/application.yaml
           # Only the dedicated-hub profile installs cert-manager, registers clusters and runs MaaS on a site.

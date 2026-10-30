@@ -50,8 +50,8 @@ spec:
     spec:
       project: default
       source:
-        repoURL: https://github.com/kahowell/ai-grid-tenant.git
-        targetRevision: HEAD
+        repoURL: https://github.com/sjug/ai-grid-tenant.git
+        targetRevision: main
         path: '{{ if eq .name "local-cluster" }}apps/maas-db/local-cluster{{ else }}apps/maas-db/read-clusters{{ end }}'
       destination:
         server: '{{.server}}'
