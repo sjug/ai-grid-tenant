@@ -41,7 +41,7 @@ spec:
           targetRevision: main
           ref: values
         - repoURL: https://github.com/opendatahub-io/odh-gitops.git
-          targetRevision: feature-ai-grid
+          targetRevision: 44ba050152e66982c066f1f4fb6716260976e4bf # odh-gitops feature-ai-grid, pinned 2026-10-30
           path: charts/rhai-on-openshift-chart/charts/praxis-gateway
           helm:
             releaseName: grid-provider-gateway

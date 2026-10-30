@@ -54,13 +54,13 @@ spec:
         # The overlay hands CRD management to Argo and protects them from pruning.
         # See odh-gitops/components/ai-grid-crds/README.md for the ownership handoff.
         - repoURL: https://github.com/opendatahub-io/odh-gitops.git
-          targetRevision: feature-ai-grid
+          targetRevision: 44ba050152e66982c066f1f4fb6716260976e4bf # odh-gitops feature-ai-grid, pinned 2026-10-30
           path: components/ai-grid-crds
         # Pinned to a feature branch carrying operator.olm.createNamespace until
         # the change is available upstream. This lets ACM own protected
         # Namespaces while the chart still owns the OLM operator resources.
         - repoURL: https://github.com/opendatahub-io/odh-gitops.git
-          targetRevision: feature-ai-grid
+          targetRevision: 44ba050152e66982c066f1f4fb6716260976e4bf # odh-gitops feature-ai-grid, pinned 2026-10-30
           path: charts/rhai-on-openshift-chart
           helm:
             releaseName: rhai-on-openshift
