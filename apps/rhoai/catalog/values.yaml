@@ -11,7 +11,8 @@ refresh:
   catalogSettleSeconds: 180
   waitTimeoutSeconds: 600
   operatorRolloutTimeoutSeconds: 300
-  activeDeadlineSeconds: 960
+  # Must exceed settle + OLM wait + operator rollout (180 + 600 + 300) plus overhead.
+  activeDeadlineSeconds: 1500
   resources:
     requests:
       cpu: 10m
