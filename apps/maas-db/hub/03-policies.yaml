@@ -93,4 +93,4 @@ spec:
                 type: Opaque
                 stringData:
                   DB_CONNECTION_URL: '{{hub printf "postgresql://%s:%s@maas-db-rw.maas-db.svc.clusterset.local:5432/%s?sslmode=require" (fromSecret "maas-db" "maas-db-app" "username" | base64dec | urlquery) (fromSecret "maas-db" "maas-db-app" "password" | base64dec | urlquery) (fromSecret "maas-db" "maas-db-app" "dbname" | base64dec) hub}}'
-                  DB_READ_CONNECTION_URL: '{{hub printf "postgresql://%s:%s@maas-read-ro.maas-db.svc.cluster.local:5432/%s?sslmode=require" (fromSecret "maas-db" "maas-db-app" "username" | base64dec | urlquery) (fromSecret "maas-db" "maas-db-app" "password" | base64dec | urlquery) (fromSecret "maas-db" "maas-db-app" "dbname" | base64dec) hub}}'
+                  DB_READ_CONNECTION_URL: '{{hub printf "postgresql://%s:%s@maas-read-r.maas-db.svc.cluster.local:5432/%s?sslmode=require" (fromSecret "maas-db" "maas-db-app" "username" | base64dec | urlquery) (fromSecret "maas-db" "maas-db-app" "password" | base64dec | urlquery) (fromSecret "maas-db" "maas-db-app" "dbname" | base64dec) hub}}'

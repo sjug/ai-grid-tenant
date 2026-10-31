@@ -22,13 +22,19 @@ automated deletion.
   `acm-submariner` ApplicationSet, so new clusters are onboarded automatically.
 - Each remote cluster runs `maas-read`, a CloudNativePG replica cluster using
   `pg_basebackup` and continuous TLS streaming replication.
-- `local-cluster` exposes `maas-read-ro` as an ExternalName to its local
-  CloudNativePG read-only Service. Every cluster therefore has the same read
-  endpoint:
+- `local-cluster` exposes `maas-read-r` (and the older alias `maas-read-ro`) as
+  ExternalNames to its local CloudNativePG read-only Service. Every cluster
+  therefore has the same read endpoint:
 
 ```text
-maas-read-ro.maas-db.svc.cluster.local:5432
+maas-read-r.maas-db.svc.cluster.local:5432
 ```
+
+  On a remote site that name is CloudNativePG's own `-r` Service of the replica
+  cluster. The replica has one instance, which CloudNativePG labels
+  `role=primary` (the designated primary of a replica cluster, still in
+  recovery); the `-ro` Service selects `role=replica` and so never has an
+  endpoint there, while `-r` selects every ready instance.
 
 - `maas-api` reads `maas-db-config` from its own namespace. The Secret has
   `DB_CONNECTION_URL` for the writable service and

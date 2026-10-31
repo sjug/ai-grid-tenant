@@ -89,6 +89,13 @@ spec:
           path: apps/rhoai/local-cluster
           directory:
             exclude: '{{ if eq (index .metadata.labels "local-cluster") "true" }}{{ else }}*{{ end }}'
+        # MaaS sites (role ingress or combined, the hub included) get the Authorino
+        # trust patch; an inference site runs no MaaS and excludes it.
+        - repoURL: https://github.com/sjug/ai-grid-tenant.git
+          targetRevision: main
+          path: apps/rhoai/maas-sites
+          directory:
+            exclude: '{{ if eq (index .metadata.labels "ai-grid/role") "inference" }}*{{ end }}'
         - repoURL: https://github.com/sjug/ai-grid-tenant.git
           targetRevision: main
           path: apps/rhoai/catalog

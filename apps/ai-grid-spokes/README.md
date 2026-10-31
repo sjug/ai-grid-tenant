@@ -51,6 +51,16 @@ their gateway address, and the provider gateway NetworkPolicy CIDR for a site
 outside the lab VPC. See
 [cluster onboarding](../../docs/acm/cluster-onboarding/README.md).
 
+## Changing a site to ingress or combined
+
+The MaaS it gains validates users against the home's Keycloak over the home's
+Route, so the site's cluster trust must carry the home's ingress CA first
+(`proxy/cluster` `spec.trustedCA`, as the hub's bootstrap does for itself);
+`apps/rhoai/maas-sites` then mounts that bundle and the service CA into the
+site's Authorino. The site also gets a `maas-db` read replica, whose read
+endpoint is `maas-read-r` (see `apps/maas-db/README.md`), and the MaaS side of
+every catalog model.
+
 ## What a Remove does
 
 Removing `ai-grid/enabled`, or the role, takes the cluster out of these Placements, so its

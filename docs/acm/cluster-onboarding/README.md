@@ -52,6 +52,9 @@ as an override when present.
   NXDOMAIN, while glibc clients (curl in the same pod) still connect, so a lab
   DNS that templates only A records leaves every GridSite Connecting. Check with
   `dig AAAA router-default.apps.<cluster>.<domain>`.
+- For an ingress or combined site: the cluster trust (`proxy/cluster`
+  `spec.trustedCA`) must include the MaaS home's ingress CA before the role is
+  set, so the site's Authorino can reach the home's Keycloak Route.
 - Capacity for the sample models: three replicas of 1 CPU and 10Gi memory. A
   GPU model needs GPU nodes and the NVIDIA operator, which this repository does
   not install.

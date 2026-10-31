@@ -1,11 +1,13 @@
-# Authorino needs two trust anchors the image's system roots lack: the cluster's
-# own ingress CA, to reach Keycloak's Route for OpenID discovery (otherwise every
+# Delivered to every MaaS site (role ingress or combined, the hub included); an
+# inference site runs no MaaS and excludes this directory (apps/rhoai/hub/01-applicationset.yaml).
+# Authorino needs two trust anchors the image's system roots lack: the ingress CA
+# of the MaaS home, to reach Keycloak's Route for OpenID discovery (otherwise every
 # MaaS API call is 401 "certificate signed by unknown authority"), and the
 # OpenShift Service CA, to call the MaaS API's internal key-validation endpoint
 # over HTTPS (otherwise API-key requests are 403 after "cannot fetch metadata").
 # The Authorino CR exposes no environment field, but it does mount volumes: mount
 # the network operator's cluster bundle (system roots plus the proxy trustedCA,
-# which the hub bootstrap sets to the ingress CA) and the service CA together over
+# which the site's trust step sets to the home's ingress CA) and the service CA together over
 # the image's default CA directory, where Go loads every file. A server-side-apply
 # partial, like the upstream chart's Deployment patch, because the RHCL operator
 # owns the CR. The upstream knob authorinoServiceCaTrust covers only the service
