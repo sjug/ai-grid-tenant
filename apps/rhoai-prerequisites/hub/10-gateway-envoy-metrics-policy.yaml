@@ -1,0 +1,114 @@
+# The serving gateway's full Envoy statistics (the EPP's ext_proc, downstream and upstream counters,
+# memory) on inference-only sites. Kuadrant's istio-pod-monitor provides them where MaaS runs (ingress and
+# combined sites); an inference site has only RHOAI's openshift-ai-inference-metrics PodMonitor, which keeps
+# the Istio request families alone, so its gateway's Envoy filter statistics were never scraped. This
+# PodMonitor goes to inference sites only (no overlap with Kuadrant's), uses its own name, and drops the
+# Istio request families RHOAI's monitor already delivers (no duplicate series).
+apiVersion: cluster.open-cluster-management.io/v1beta1
+kind: Placement
+metadata:
+  name: rhoai-inference-only
+  namespace: rhoai-prerequisites
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+spec:
+  clusterSets:
+    - global
+  predicates:
+    - requiredClusterSelector:
+        labelSelector:
+          matchLabels:
+            ai-grid/enabled: "true"
+          matchExpressions:
+            - key: ai-grid/role
+              operator: In
+              values: [inference]
+---
+apiVersion: policy.open-cluster-management.io/v1
+kind: Policy
+metadata:
+  name: rhoai-gateway-envoy-metrics
+  namespace: rhoai-prerequisites
+  annotations:
+    argocd.argoproj.io/sync-wave: "4"
+spec:
+  disabled: false
+  remediationAction: enforce
+  policy-templates:
+    - objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1
+        kind: ConfigurationPolicy
+        metadata:
+          name: rhoai-gateway-envoy-metrics
+        spec:
+          remediationAction: enforce
+          severity: medium
+          object-templates:
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: monitoring.coreos.com/v1
+                kind: PodMonitor
+                metadata:
+                  name: ai-grid-gateway-envoy-stats
+                  namespace: openshift-ingress
+                  labels:
+                    app.kubernetes.io/part-of: ai-grid
+                spec:
+                  # Gateway pods only (the gateway controller labels them); nothing opted out.
+                  selector:
+                    matchExpressions:
+                      - key: gateway.networking.k8s.io/gateway-name
+                        operator: Exists
+                      - key: istio-prometheus-ignore
+                        operator: DoesNotExist
+                  podMetricsEndpoints:
+                    - interval: 30s
+                      path: /stats/prometheus
+                      relabelings:
+                        - action: keep
+                          sourceLabels: [__meta_kubernetes_pod_container_name]
+                          regex: istio-proxy
+                        - action: keep
+                          sourceLabels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape]
+                          regex: 'true'
+                        # Scrape the merged metrics port named in the pod's prometheus.io/port annotation.
+                        - action: replace
+                          sourceLabels: [__meta_kubernetes_pod_annotation_prometheus_io_port, __meta_kubernetes_pod_ip]
+                          regex: '(\d+);(([A-Fa-f0-9]{1,4}::?){1,7}[A-Fa-f0-9]{1,4})'
+                          replacement: '[$2]:$1'
+                          targetLabel: __address__
+                        - action: replace
+                          sourceLabels: [__meta_kubernetes_pod_annotation_prometheus_io_port, __meta_kubernetes_pod_ip]
+                          regex: '(\d+);((([0-9]+?)(\.|$)){4})'
+                          replacement: '$2:$1'
+                          targetLabel: __address__
+                        - action: replace
+                          sourceLabels: [__meta_kubernetes_pod_label_gateway_networking_k8s_io_gateway_name]
+                          targetLabel: gateway_name
+                        - action: replace
+                          sourceLabels: [__meta_kubernetes_namespace]
+                          targetLabel: namespace
+                        - action: replace
+                          sourceLabels: [__meta_kubernetes_pod_name]
+                          targetLabel: pod
+                      metricRelabelings:
+                        # RHOAI's openshift-ai-inference-metrics PodMonitor already keeps these four families.
+                        - action: drop
+                          sourceLabels: [__name__]
+                          regex: 'istio_requests_total|istio_request_duration_milliseconds_(bucket|sum|count)|istio_request_bytes_(bucket|sum|count)|istio_response_bytes_(bucket|sum|count)'
+---
+apiVersion: policy.open-cluster-management.io/v1
+kind: PlacementBinding
+metadata:
+  name: rhoai-gateway-envoy-metrics
+  namespace: rhoai-prerequisites
+  annotations:
+    argocd.argoproj.io/sync-wave: "3"
+placementRef:
+  apiGroup: cluster.open-cluster-management.io
+  kind: Placement
+  name: rhoai-inference-only
+subjects:
+  - apiGroup: policy.open-cluster-management.io
+    kind: Policy
+    name: rhoai-gateway-envoy-metrics

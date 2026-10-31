@@ -9,9 +9,8 @@ metadata:
   labels:
     # The component label picks the addon's user-workload Prometheus agent; the copy to every managed
     # cluster (the hub included) comes from this object's entry under the ClusterManagementAddOn's
-    # placement configs (apps/rhoai-prerequisites/hub/09-observability-addon-policy.yaml). On the
-    # managed cluster the placeholders below become that cluster's user-workload Prometheus federate
-    # endpoint and the monitoring scrape class.
+    # placement configs (apps/rhoai-prerequisites/hub/09-observability-addon-policy.yaml). The copy
+    # is verbatim: unlike platform jobs, user-workload jobs get no placeholder substitution.
     app.kubernetes.io/component: user-workload-metrics-collector
     app.kubernetes.io/part-of: multicluster-observability-addon
   annotations:
@@ -22,9 +21,9 @@ spec:
   # The agents' default cadence is 300 s; the campaign needs 30 s on these jobs only.
   scrapeInterval: 30s
   scheme: HTTPS
-  # Placeholder like the target below: the addon substitutes its agents' scrape class (in-cluster
-  # monitoring TLS and bearer token), as on its own ScrapeConfigs.
-  scrapeClass: not-configurable
+  # The addon substitutes placeholders only on platform jobs; a user-workload job names its target and
+  # the agents' default scrape class (service-account token, service CA) itself.
+  scrapeClass: ocp-monitoring
   params:
     match[]:
           - '{__name__=~"grid_.*"}'
@@ -45,4 +44,4 @@ spec:
           - '{__name__=~"thanos_(receive|compact|store|query|objstore)_.*",namespace="open-cluster-management-observability"}'
   staticConfigs:
     - targets:
-        - not-configurable
+        - prometheus-user-workload.openshift-user-workload-monitoring.svc:9092
