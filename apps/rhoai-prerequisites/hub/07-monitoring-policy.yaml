@@ -1,0 +1,135 @@
+# Monitoring on every cluster, for the AI Grid's own metrics and the performance campaign:
+# user-workload monitoring on (the grid, MaaS, EPP and MetalLB ServiceMonitors are scraped
+# by nobody without it), persistent storage and retention for both Prometheus instances, and
+# the Cluster Observability Operator, which the RHOAI monitoring stack (MonitoringStack API)
+# needs on every site; on the hub the ACM addon installed it, the spokes had nothing.
+apiVersion: policy.open-cluster-management.io/v1
+kind: Policy
+metadata:
+  name: rhoai-monitoring
+  namespace: rhoai-prerequisites
+  annotations:
+    argocd.argoproj.io/sync-wave: "4"
+spec:
+  disabled: false
+  remediationAction: enforce
+  policy-templates:
+    - objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1
+        kind: ConfigurationPolicy
+        metadata:
+          name: rhoai-cluster-monitoring
+        spec:
+          remediationAction: enforce
+          severity: medium
+          object-templates:
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: v1
+                kind: ConfigMap
+                metadata:
+                  name: cluster-monitoring-config
+                  namespace: openshift-monitoring
+                data:
+                  config.yaml: |
+                    enableUserWorkload: true
+                    prometheusK8s:
+                      # Up to 15 days, size capped at 80 % of the volume (the hub's 1.1 M series,
+                      # mostly Istio and Envoy, write tens of GiB a week).
+                      retention: 15d
+                      retentionSize: 160GiB
+                      volumeClaimTemplate:
+                        spec:
+                          storageClassName: lvms-vg1
+                          resources:
+                            requests:
+                              storage: 200Gi
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: v1
+                kind: ConfigMap
+                metadata:
+                  name: user-workload-monitoring-config
+                  namespace: openshift-user-workload-monitoring
+                data:
+                  config.yaml: |
+                    prometheus:
+                      retention: 15d
+                      retentionSize: 80GiB
+                      volumeClaimTemplate:
+                        spec:
+                          storageClassName: lvms-vg1
+                          resources:
+                            requests:
+                              storage: 100Gi
+    - objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1
+        kind: ConfigurationPolicy
+        metadata:
+          name: rhoai-cluster-observability-operator
+        spec:
+          remediationAction: enforce
+          severity: medium
+          object-templates:
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: v1
+                kind: Namespace
+                metadata:
+                  name: openshift-cluster-observability-operator
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: operators.coreos.com/v1
+                kind: OperatorGroup
+                metadata:
+                  name: openshift-cluster-observability-operator
+                  namespace: openshift-cluster-observability-operator
+                spec: {}
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: operators.coreos.com/v1alpha1
+                kind: Subscription
+                metadata:
+                  name: cluster-observability-operator
+                  namespace: openshift-cluster-observability-operator
+                spec:
+                  channel: stable
+                  installPlanApproval: Automatic
+                  name: cluster-observability-operator
+                  source: redhat-operators
+                  sourceNamespace: openshift-marketplace
+    - objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1
+        kind: ConfigurationPolicy
+        metadata:
+          name: rhoai-collector-federation
+        spec:
+          remediationAction: enforce
+          severity: medium
+          object-templates:
+            # The ACM user-workload agent federates RHOAI's collector exporter (ScrapeConfig rhai-metrics
+            # in apps/ai-grid-o11y) on every site; the hub carries the same policy from that app.
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: networking.k8s.io/v1
+                kind: NetworkPolicy
+                metadata:
+                  name: allow-acm-rhai-metrics
+                  namespace: redhat-ods-monitoring
+                  labels:
+                    app.kubernetes.io/component: user-workload-metrics-collector
+                spec:
+                  podSelector:
+                    matchLabels:
+                      app.kubernetes.io/instance: redhat-ods-monitoring.data-science-collector
+                      app.kubernetes.io/component: opentelemetry-collector
+                  policyTypes:
+                    - Ingress
+                  ingress:
+                    - from:
+                        - namespaceSelector:
+                            matchLabels:
+                              kubernetes.io/metadata.name: open-cluster-management-agent-addon
+                      ports:
+                        - port: 8889
+                          protocol: TCP

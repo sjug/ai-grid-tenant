@@ -1,0 +1,48 @@
+# AI Grid, MaaS, Limitador, Authorino, Kuadrant, CloudNativePG, MetalLB, EPP and engine series from each
+# cluster's user-workload Prometheus, every 30 s, into the hub's Thanos. Families are selected by regex
+# (federation takes PromQL selectors); generic Go, process and controller families are limited to our namespaces.
+apiVersion: monitoring.rhobs/v1alpha1
+kind: ScrapeConfig
+metadata:
+  name: ai-grid-user-workload-metrics
+  namespace: open-cluster-management-observability
+  labels:
+    # The component label picks the addon's user-workload Prometheus agent; the copy to every managed
+    # cluster (the hub included) comes from this object's entry under the ClusterManagementAddOn's
+    # placement configs (apps/rhoai-prerequisites/hub/09-observability-addon-policy.yaml). On the
+    # managed cluster the placeholders below become that cluster's user-workload Prometheus federate
+    # endpoint and the monitoring scrape class.
+    app.kubernetes.io/component: user-workload-metrics-collector
+    app.kubernetes.io/part-of: multicluster-observability-addon
+  annotations:
+    argocd.argoproj.io/sync-wave: "6"
+spec:
+  jobName: ai-grid-user-workload
+  metricsPath: /federate
+  # The agents' default cadence is 300 s; the campaign needs 30 s on these jobs only.
+  scrapeInterval: 30s
+  scheme: HTTPS
+  # Placeholder like the target below: the addon substitutes its agents' scrape class (in-cluster
+  # monitoring TLS and bearer token), as on its own ScrapeConfigs.
+  scrapeClass: not-configurable
+  params:
+    match[]:
+          - '{__name__=~"grid_.*"}'
+          - '{__name__=~"praxis_.*"}'
+          - '{__name__=~"limitador_.*|limited_.*|report_calls"}'
+          - '{__name__=~"auth_.*|authorized_.*|authorino_.*"}'
+          - '{__name__=~"kuadrant_.*"}'
+          - '{__name__=~"cnpg_.*"}'
+          - '{__name__=~"metallb_.*|frrk8s_.*"}'
+          - '{__name__=~"inference_.*|epp_.*|llm_d_epp_.*|llm_d_.*"}'
+          - '{__name__=~"vllm:.*"}'
+          - '{__name__=~"maas_.*|active_.*|datastore_.*|dns_.*|leader_.*"}'
+          - '{__name__=~"controller_runtime_.*|workqueue_.*|rest_client_requests_total",namespace=~"redhat-ai-grid|redhat-ai-gateway-infra|models-as-a-service|kuadrant-system|maas-db|redhat-ods-applications|metallb-system"}'
+          - '{__name__=~"process_.*|go_goroutines|go_memstats_heap_inuse_bytes|go_memstats_alloc_bytes|go_gc_duration_seconds.*|grpc_server_.*",namespace=~"redhat-ai-grid|redhat-ai-gateway-infra|models-as-a-service|kuadrant-system|maas-db|ai-grid-internal-models|metallb-system"}'
+          - '{__name__=~"up|scrape_duration_seconds|scrape_samples_scraped",namespace=~"redhat-ai-grid|redhat-ai-gateway-infra|models-as-a-service|kuadrant-system|maas-db|ai-grid-internal-models|metallb-system|open-cluster-management-agent-addon|open-cluster-management-observability"}'
+          # The collection path itself: the addon's Prometheus agents (remote write to the hub) and, on the hub, Thanos.
+          - '{__name__=~"prometheus_(tsdb_head_series|tsdb_head_samples_appended_total|target_scrapes_.*|target_scrape_pool_targets|remote_storage_.*|agent_.*)",namespace=~"open-cluster-management-agent-addon|open-cluster-management-observability"}'
+          - '{__name__=~"thanos_(receive|compact|store|query|objstore)_.*",namespace="open-cluster-management-observability"}'
+  staticConfigs:
+    - targets:
+        - not-configurable

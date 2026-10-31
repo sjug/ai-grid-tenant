@@ -82,6 +82,23 @@ components:
         infrastructure:
           annotations:
             service.beta.openshift.io/serving-cert-secret-name: openshift-ai-inference-service-tls
+            # Envoy statistics Istio's default matcher drops: the EPP's ext_proc, Authorino's ext_authz,
+            # downstream request and connection counters, upstream pools, wasm. The performance campaign
+            # reads them (ServiceMonitors in openshift-ingress scrape the gateway pods).
+            proxy.istio.io/config: |
+                  proxyStatsMatcher:
+                    inclusionRegexps:
+                      - ".*ext_proc.*"
+                      - ".*ext_authz.*"
+                      - ".*ratelimit.*"
+                      - ".*wasm.*"
+                      - "http\\..*\\.downstream_rq_.*"
+                      - "http\\..*\\.downstream_cx_.*"
+                      - "listener\\..*\\.downstream_cx_.*"
+                      - "cluster\\..*\\.upstream_(rq|cx)_.*"
+                      - "server\\..*"
+                      - "overload\\..*"
+                      - "cluster\\..*\\.outlier_detection\\..*"
         listeners:
           - name: http
             port: 80
@@ -117,6 +134,24 @@ components:
     modelsAsAService:
       gateway:
         spec:
+          infrastructure:
+            annotations:
+              # Same Envoy statistics for the MaaS gateway: payload-processing ext_proc, Authorino
+              # ext_authz, the Kuadrant wasm shim and Limitador rate limiting, downstream and upstream counters.
+              proxy.istio.io/config: |
+                    proxyStatsMatcher:
+                      inclusionRegexps:
+                        - ".*ext_proc.*"
+                        - ".*ext_authz.*"
+                        - ".*ratelimit.*"
+                        - ".*wasm.*"
+                        - "http\\..*\\.downstream_rq_.*"
+                        - "http\\..*\\.downstream_cx_.*"
+                        - "listener\\..*\\.downstream_cx_.*"
+                        - "cluster\\..*\\.upstream_(rq|cx)_.*"
+                        - "server\\..*"
+                        - "overload\\..*"
+                        - "cluster\\..*\\.outlier_detection\\..*"
           listeners:
             - name: http
               port: 80

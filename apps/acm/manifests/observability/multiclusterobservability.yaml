@@ -7,7 +7,11 @@ metadata:
     argocd.argoproj.io/sync-wave: "5"
 spec:
   instanceSize: minimal
-  observabilityAddonSpec: {}
+  observabilityAddonSpec:
+    # The addon's agents take their cadence from each ScrapeConfig's scrapeInterval (the campaign
+    # jobs set 30s); this field is the collector default (15 to 3600, default 300) and is lowered
+    # so that whatever still follows it also samples every 30 s.
+    interval: 30
   storageConfig:
     metricObjectStorage:
       name: thanos-object-storage
@@ -15,9 +19,11 @@ spec:
     compactStorageSize: 101Gi
   advanced:
     retentionConfig:
-      retentionResolutionRaw: 7d
-      retentionResolution5m: 7d
-      retentionResolution1h: 14d
+      # Raw samples through the performance campaign and its analysis. The 5m retention
+      # must exceed Thanos's 10-day downsampling threshold or the compactor exits at start.
+      retentionResolutionRaw: 45d
+      retentionResolution5m: 90d
+      retentionResolution1h: 365d
     # Default sts size was 6, making node drain challenging
     receive:
       replicas: 2

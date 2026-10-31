@@ -1,0 +1,15 @@
+# Capacity for the ACM observability bucket: the default NooBaa backing store is one
+# 50Gi volume on this lab; four give the Thanos bucket room for the campaign's raw and
+# downsampled blocks. The ODF operator created and owns the BackingStore, so this is a
+# server-side-apply partial that owns exactly one field, like the Authorino trust patch.
+apiVersion: noobaa.io/v1alpha1
+kind: BackingStore
+metadata:
+  name: noobaa-default-backing-store
+  namespace: openshift-storage
+  annotations:
+    argocd.argoproj.io/sync-options: ServerSideApply=true,Validate=false,DisableClientSideApplyMigration=true,Prune=false,Delete=false
+    argocd.argoproj.io/sync-wave: "3"
+spec:
+  pvPool:
+    numVolumes: 4

@@ -1,0 +1,58 @@
+# Istio gateway and Envoy data-plane series (openshift-ingress), container CPU, memory, network and OOM
+# for the AI Grid namespaces, pod restarts and phases, PVC usage, Submariner, CoreDNS, the router, node TCP,
+# conntrack and file descriptors, OVN: the platform side of a performance investigation, from each
+# cluster's platform Prometheus every 30 s into the hub's Thanos.
+apiVersion: monitoring.rhobs/v1alpha1
+kind: ScrapeConfig
+metadata:
+  name: ai-grid-platform-metrics
+  namespace: open-cluster-management-observability
+  labels:
+    # The component label picks the addon's platform Prometheus agent; the copy to every managed
+    # cluster (the hub included) comes from this object's entry under the ClusterManagementAddOn's
+    # placement configs (apps/rhoai-prerequisites/hub/09-observability-addon-policy.yaml). On the
+    # managed cluster the placeholders below become that cluster's platform Prometheus federate
+    # endpoint and the monitoring scrape class.
+    app.kubernetes.io/component: platform-metrics-collector
+    app.kubernetes.io/part-of: multicluster-observability-addon
+  annotations:
+    argocd.argoproj.io/sync-wave: "6"
+spec:
+  jobName: ai-grid-platform
+  metricsPath: /federate
+  # The agents' default cadence is 300 s; the campaign needs 30 s on these jobs only.
+  scrapeInterval: 30s
+  scheme: HTTPS
+  # Placeholder like the target below: the addon substitutes its agents' scrape class (in-cluster
+  # monitoring TLS and bearer token), as on its own ScrapeConfigs.
+  scrapeClass: not-configurable
+  params:
+    match[]:
+          - '{__name__=~"istio_requests_total|istio_request_duration_milliseconds_.*|istio_request_bytes_.*|istio_response_bytes_.*|istio_tcp_.*"}'
+          - '{__name__=~"istio_agent_.*|istio_build|pilot_.*"}'
+          - '{__name__=~"envoy_cluster_upstream_(cx_active|cx_connect_fail|cx_overflow|cx_total|rq_active|rq_pending_.*|rq_retry.*|rq_time.*|rq_timeout|rq_total|rq_5xx|rq_4xx|rq_completed)"}'
+          - '{__name__=~"envoy_http_downstream_(cx_active|cx_total|cx_overflow|rq_active|rq_total|rq_time.*|rq_5xx|rq_4xx|rq_2xx)"}'
+          - '{__name__=~"envoy_listener_downstream_cx_(active|total|overflow)|envoy_listener_.*_downstream_cx_(active|total|overflow)|envoy_listener_manager_.*"}'
+          - '{__name__=~"envoy_server_(memory_.*|live|concurrency|total_connections|uptime|hot_restart_epoch|version)"}'
+          # Filter statistics: the Kuadrant wasm shim, external processing (payload processing), external
+          # authorization (Authorino) and rate limiting (Limitador). ext_proc, ext_authz and ratelimit stats only
+          # exist once the gateway's proxyStatsMatcher includes them (set on the MaaS gateway in this change).
+          - '{__name__=~"envoy_wasm_.*|wasmcustom_.*|envoy_http_ext_proc_.*|envoy_ext_proc_.*|envoy_http_ext_authz_.*|envoy_ext_authz_.*|envoy_cluster_.*ratelimit.*|envoy_http_.*ratelimit.*|envoy_ratelimit_.*|envoy_overload_.*|envoy_cluster_outlier_detection_.*"}'
+          - '{__name__=~"container_(cpu_usage_seconds_total|cpu_cfs_throttled_seconds_total|cpu_cfs_throttled_periods_total|cpu_cfs_periods_total|memory_working_set_bytes|memory_rss|oom_events_total|fs_usage_bytes)",namespace=~"openshift-ingress|redhat-ai-grid|redhat-ai-gateway-infra|models-as-a-service|kuadrant-system|maas-db|limitador-redis|ai-grid-internal-models|openshift-ai-inference|redhat-ods-applications|redhat-ods-monitoring|submariner-operator|openshift-dns|open-cluster-management-observability|open-cluster-management-agent-addon|openshift-storage|openshift-monitoring|openshift-user-workload-monitoring",container!="",container!="POD"}'
+          # Pod network counters are reported on the sandbox, so no container exclusion here.
+          - '{__name__=~"container_network_(receive|transmit)_(bytes|packets|packets_dropped|errors)_total",namespace=~"openshift-ingress|redhat-ai-grid|redhat-ai-gateway-infra|kuadrant-system|maas-db|limitador-redis|ai-grid-internal-models|openshift-ai-inference|submariner-operator|openshift-dns"}'
+          - '{__name__=~"kube_pod_container_status_(restarts_total|last_terminated_reason|waiting_reason)|kube_pod_status_phase|kube_pod_status_ready|kube_deployment_status_replicas_available|kube_statefulset_status_replicas_ready",namespace=~"openshift-ingress|redhat-ai-grid|redhat-ai-gateway-infra|models-as-a-service|kuadrant-system|maas-db|limitador-redis|ai-grid-internal-models|openshift-ai-inference|redhat-ods-applications|redhat-ods-monitoring|submariner-operator|open-cluster-management-observability|openshift-storage"}'
+          - '{__name__=~"kube_persistentvolumeclaim_.*|kubelet_volume_stats_(used_bytes|capacity_bytes|available_bytes)"}'
+          - '{__name__=~"submariner_.*"}'
+          - '{__name__=~"coredns_.*"}'
+          - '{__name__=~"haproxy_(backend|server)_(http_responses_total|response_errors_total|connection_errors_total|current_sessions|current_queue|max_sessions|bytes_in_total|bytes_out_total|up|http_average_response_latency_milliseconds|http_average_connect_latency_milliseconds)|haproxy_frontend_(current_sessions|current_session_rate|max_sessions|connections_total|http_responses_total|bytes_in_total|bytes_out_total)"}'
+          - '{__name__=~"node_netstat_Tcp_(ActiveOpens|PassiveOpens|CurrEstab|RetransSegs|InErrs|OutRsts)|node_sockstat_TCP_(alloc|inuse|tw|orphan)|node_nf_conntrack_entries(_limit)?|node_filefd_(allocated|maximum)|node_network_(receive|transmit)_(bytes|packets|drop|errs)_total|node_pressure_.*|node_disk_(io_time_seconds_total|read_bytes_total|written_bytes_total)|node_memory_(MemAvailable_bytes|MemTotal_bytes)|node_load1"}'
+          # API server work the grid and MaaS generate: token and access reviews, publication and churn objects.
+          - '{__name__=~"apiserver_request_duration_seconds_bucket|apiserver_request_total",resource=~"tokenreviews|subjectaccessreviews|inferenceproviders|llminferenceservices|externalmodels|gridsites|gridnetworks|apikeys|maassubscriptions"}'
+          - '{__name__=~"apiserver_current_inflight_requests|etcd_disk_wal_fsync_duration_seconds_bucket|etcd_disk_backend_commit_duration_seconds_bucket"}'
+          # The local monitoring system: series, ingestion, scrape failures.
+          - '{__name__=~"prometheus_tsdb_head_series|prometheus_tsdb_head_samples_appended_total|prometheus_target_scrapes_sample_out_of_order_total|prometheus_target_scrape_pool_targets|prometheus_rule_evaluation_failures_total",namespace=~"openshift-monitoring|openshift-user-workload-monitoring"}'
+          - '{__name__=~"ovnkube_controller_.*|ovn_controller_.*"}'
+  staticConfigs:
+    - targets:
+        - not-configurable

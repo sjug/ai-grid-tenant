@@ -1,0 +1,82 @@
+# Registers the AI Grid ScrapeConfigs with the multicluster observability addon. ACM 2.17 copies a
+# custom ScrapeConfig to the managed clusters only when it is listed under the addon's placement
+# configs (the component label then picks the platform or user-workload agent). The
+# ClusterManagementAddOn is owned by the MultiClusterObservability operator and its configs list is
+# a plain list, so this is a musthave on the hub: ACM adds the entries that are missing and leaves
+# the operator's defaults in place.
+apiVersion: cluster.open-cluster-management.io/v1beta1
+kind: Placement
+metadata:
+  name: rhoai-hub
+  namespace: rhoai-prerequisites
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+spec:
+  clusterSets:
+    - global
+  predicates:
+    - requiredClusterSelector:
+        labelSelector:
+          matchLabels:
+            local-cluster: "true"
+---
+apiVersion: policy.open-cluster-management.io/v1
+kind: Policy
+metadata:
+  name: rhoai-observability-addon
+  namespace: rhoai-prerequisites
+  annotations:
+    argocd.argoproj.io/sync-wave: "6"
+spec:
+  disabled: false
+  remediationAction: enforce
+  policy-templates:
+    - objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1
+        kind: ConfigurationPolicy
+        metadata:
+          name: rhoai-observability-addon-scrapeconfigs
+        spec:
+          remediationAction: enforce
+          severity: medium
+          object-templates:
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: addon.open-cluster-management.io/v1alpha1
+                kind: ClusterManagementAddOn
+                metadata:
+                  name: multicluster-observability-addon
+                spec:
+                  installStrategy:
+                    placements:
+                      - name: global
+                        namespace: open-cluster-management-global-set
+                        configs:
+                          - group: monitoring.rhobs
+                            resource: scrapeconfigs
+                            namespace: open-cluster-management-observability
+                            name: ai-grid-platform-metrics
+                          - group: monitoring.rhobs
+                            resource: scrapeconfigs
+                            namespace: open-cluster-management-observability
+                            name: ai-grid-user-workload-metrics
+                          - group: monitoring.rhobs
+                            resource: scrapeconfigs
+                            namespace: open-cluster-management-observability
+                            name: rhai-metrics
+---
+apiVersion: policy.open-cluster-management.io/v1
+kind: PlacementBinding
+metadata:
+  name: rhoai-observability-addon
+  namespace: rhoai-prerequisites
+  annotations:
+    argocd.argoproj.io/sync-wave: "6"
+placementRef:
+  apiGroup: cluster.open-cluster-management.io
+  kind: Placement
+  name: rhoai-hub
+subjects:
+  - apiGroup: policy.open-cluster-management.io
+    kind: Policy
+    name: rhoai-observability-addon
