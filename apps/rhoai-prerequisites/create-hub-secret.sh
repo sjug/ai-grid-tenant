@@ -48,9 +48,10 @@ if [ -n "$context" ]; then
   kubectl_args+=(--context "$context")
 fi
 
-if ! kubectl "${kubectl_args[@]}" get namespace "$namespace" >/dev/null 2>&1; then
-  kubectl "${kubectl_args[@]}" create namespace "$namespace"
-fi
+# Declarative, so it cannot collide with Argo CD creating the same namespace
+# between a check and a create on a fresh hub.
+kubectl "${kubectl_args[@]}" create namespace "$namespace" --dry-run=client -o yaml |
+  kubectl "${kubectl_args[@]}" apply -f -
 
 docker_config_json="$(jq -n '{auths: ({"quay.io": {auth: env.RHOAI_QUAY_PULL_SECRET}}
   + if (env.RHOAI_STAGE_PULL_SECRET // "") != "" then {"registry.stage.redhat.io": {auth: env.RHOAI_STAGE_PULL_SECRET}} else {} end)}')"
