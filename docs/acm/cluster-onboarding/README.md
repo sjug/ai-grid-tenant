@@ -52,10 +52,14 @@ as an override when present.
 
 Still per site, on the hub:
 
-- A declared peer file, apps/rhoai/local-cluster/40-declared-peer-<cluster>.yaml,
-  so other sites can route to this site's models. Members do not report their
-  gateway address yet.
-- The provider gateway NetworkPolicy CIDR, for a site outside the lab VPC.
+- The provider gateway NetworkPolicy CIDRs in apps/rhoai/provider-gateway.yaml,
+  which must include the site's node network.
+
+Peers discover this site on their own: the local-endpoints policy publishes
+the site's GridSite from its admitted gateway and signals Routes, the
+enrollment chart's observers distribute it to the other members, and the grid
+operator reads models from the peer's provider catalog. A declared peer file
+under apps/rhoai/local-cluster is a legacy fallback, not a step.
 
 ## Prerequisites
 

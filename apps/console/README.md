@@ -60,6 +60,13 @@ creates or updates, keeping existing values:
   signs in with a username and password today.
 - `ai-grid-backend-git`: the catalog token, mounted into the backend as a file.
 
+On a cluster whose ingress certificate is not publicly trusted (a self-managed
+bare metal cluster, unlike the lab's OSD), run the script with `CURL_CA_BUNDLE`
+pointing at the cluster's ingress CA, and set `KEYCLOAK_BACKEND_URL` to
+Keycloak's in-cluster Service, `http://keycloak.maas-db.svc:8080`, so the
+backend's admin API calls need no TLS trust. Keycloak's issued URLs stay public
+because its hostname is fixed by `KC_HOSTNAME`.
+
 Then it restarts the console. Sign in with an OpenShift login that may patch
 ManagedClusters.
 

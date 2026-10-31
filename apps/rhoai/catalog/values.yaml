@@ -6,7 +6,9 @@ refresh:
   subscriptionNamespace: redhat-ods-operator
   subscriptionName: rhods-operator
   image: registry.redhat.io/openshift4/ose-cli@sha256:75bd612f3d2b4dbddcbd7a48e12b5cb4d36e4a2683e7f48209e40596e0fbfc30
-  catalogSettleSeconds: 15
+  # A cold self-managed hub needs longer than the lab's warm OSD for the catalog
+  # pod and the Subscription to exist; the Job has backoffLimit 0.
+  catalogSettleSeconds: 180
   waitTimeoutSeconds: 600
   operatorRolloutTimeoutSeconds: 300
   activeDeadlineSeconds: 960

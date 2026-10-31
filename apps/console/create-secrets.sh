@@ -38,6 +38,14 @@ Optional environment:
                           Secret records one yet (a user an older version of
                           this script created). The error that asks for it
                           prints the id.
+  KEYCLOAK_BACKEND_URL    The Keycloak URL stored for the backend; defaults to
+                          the public Route URL. On a cluster whose ingress
+                          certificate is not publicly trusted, set it to the
+                          in-cluster HTTP Service, e.g.
+                          http://keycloak.maas-db.svc:8080 (Keycloak keeps its
+                          public hostname through KC_HOSTNAME). This script's
+                          own calls go through the Route; give curl the ingress
+                          CA with CURL_CA_BUNDLE when needed.
 EOF
 }
 
@@ -86,6 +94,7 @@ done
 
 keycloak_host="$(k get route keycloak -n "$keycloak_namespace" -o jsonpath='{.status.ingress[0].host}')"
 [ -n "$keycloak_host" ] || die "route $keycloak_namespace/keycloak has no host"
+backend_keycloak_url="${KEYCLOAK_BACKEND_URL:-https://$keycloak_host}"
 
 # Keycloak: a backend user that may manage organizations in one realm (the
 # backend calls only the organizations and their members), not the master
@@ -148,7 +157,7 @@ realm_management="$(api "$base/clients?clientId=realm-management" | jq -re '.[0]
 api "$base/clients/$realm_management/roles" |
   jq '[.[] | select(.name | IN("view-users", "query-users", "view-realm", "manage-realm"))]' |
   api -X POST "$base/users/$user_id/role-mappings/clients/$realm_management" -d @- >/dev/null
-PW="$backend_password" BACKEND_USER_ID="$user_id" jq -n --arg ns "$namespace" --arg url "https://$keycloak_host" --arg realm "$realm" --arg user "$backend_user" \
+PW="$backend_password" BACKEND_USER_ID="$user_id" jq -n --arg ns "$namespace" --arg url "$backend_keycloak_url" --arg realm "$realm" --arg user "$backend_user" \
   '{apiVersion: "v1", kind: "Secret", metadata: {name: "ai-grid-backend-keycloak", namespace: $ns}, type: "Opaque",
     stringData: {url: $url, realm: $realm, "admin-realm": $realm, username: $user, password: env.PW, "user-id": env.BACKEND_USER_ID}}' |
   apply
