@@ -96,6 +96,40 @@ spec:
                         - action: drop
                           sourceLabels: [__name__]
                           regex: 'istio_requests_total|istio_request_duration_milliseconds_(bucket|sum|count)|istio_request_bytes_(bucket|sum|count)|istio_response_bytes_(bucket|sum|count)'
+    - objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1
+        kind: ConfigurationPolicy
+        metadata:
+          name: rhoai-authorino-metrics
+        spec:
+          remediationAction: enforce
+          severity: medium
+          object-templates:
+            # Authorino performs the token review on every provider hop into the serving gateway; Kuadrant's
+            # own kuadrant-authorino-monitor exists only where MaaS runs. Same selector and endpoints as that
+            # object, under a name of its own, on inference-only sites.
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: monitoring.coreos.com/v1
+                kind: ServiceMonitor
+                metadata:
+                  name: ai-grid-authorino-metrics
+                  namespace: kuadrant-system
+                  labels:
+                    app.kubernetes.io/part-of: ai-grid
+                spec:
+                  selector:
+                    matchLabels:
+                      app.kubernetes.io/component: metrics
+                      app.kubernetes.io/part-of: authorino
+                      control-plane: controller-manager
+                  endpoints:
+                    - port: http
+                      path: /metrics
+                      scheme: http
+                    - port: http
+                      path: /server-metrics
+                      scheme: http
 ---
 apiVersion: policy.open-cluster-management.io/v1
 kind: PlacementBinding

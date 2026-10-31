@@ -35,6 +35,10 @@ spec:
         key: ca.crt
   storage:
     size: 20Gi
+  # A PodMonitor in maas-db for user-workload monitoring: replication lag, connections, transactions,
+  # WAL, for the two-entry and key-churn tests (the ACM user-workload job federates cnpg_*).
+  monitoring:
+    enablePodMonitor: true
   resources:
     requests:
       cpu: 250m

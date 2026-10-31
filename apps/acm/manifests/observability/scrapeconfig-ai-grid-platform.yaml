@@ -52,6 +52,10 @@ spec:
           - '{__name__=~"apiserver_current_inflight_requests|etcd_disk_wal_fsync_duration_seconds_bucket|etcd_disk_backend_commit_duration_seconds_bucket"}'
           # The local monitoring system: series, ingestion, scrape failures.
           - '{__name__=~"prometheus_tsdb_head_series|prometheus_tsdb_head_samples_appended_total|prometheus_target_scrapes_sample_out_of_order_total|prometheus_target_scrape_pool_targets|prometheus_rule_evaluation_failures_total",namespace=~"openshift-monitoring|openshift-user-workload-monitoring"}'
+          # The collection path itself: the addon's agents (their own metrics are scraped by the platform
+          # Prometheus, not by user-workload monitoring) and, on the hub, Thanos.
+          - '{__name__=~"prometheus_(remote_storage_.*|agent_.*|tsdb_head_series|target_scrapes_.*|target_scrape_pool_targets|sd_discovered_targets)",namespace="open-cluster-management-agent-addon"}'
+          - '{__name__=~"thanos_(receive|compact|store|query|objstore)_.*",namespace="open-cluster-management-observability"}'
           - '{__name__=~"ovnkube_controller_.*|ovn_controller_.*"}'
   staticConfigs:
     - targets:
