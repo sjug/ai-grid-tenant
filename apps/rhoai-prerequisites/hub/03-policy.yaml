@@ -153,8 +153,9 @@ spec:
                               app.kubernetes.io/instance: redhat-ods-monitoring.data-science-collector
     # The grid gateway dials each local model on the serving gateway's publisher path
     # as grid-model-client. The serving gateway's AuthPolicy authorizes that path with a
-    # SubjectAccessReview for post on serving.opendatahub.io models, which the per-model
-    # Role the model controller writes (get on the LLMInferenceService) does not grant.
+    # SubjectAccessReview for post on serving.opendatahub.io models. The pinned model
+    # controller (ee3dcb8) also writes a per-model Role for that verb; this namespace-wide
+    # grant keeps the client authorized while a model's Role is created or recreated.
     - objectDefinition:
         apiVersion: policy.open-cluster-management.io/v1
         kind: ConfigurationPolicy
@@ -195,6 +196,51 @@ spec:
                     name: grid-model-client
                     namespace: redhat-ai-grid
 
+    # The pinned odh-model-controller (#999) publishes each model to the grid by
+    # creating a per-model Role that grants the grid model client `post` on the
+    # model's publisher path. Kubernetes only lets a subject grant verbs it holds,
+    # and the RHOAI bundle's controller RBAC predates that feature, so without this
+    # ClusterRole every publication fails with "attempting to grant RBAC
+    # permissions not currently held" and no InferenceProvider exists (cloud69,
+    # 2026-10-31). Delivered to every site, like the model client's own grant.
+    - objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1
+        kind: ConfigurationPolicy
+        metadata:
+          name: odh-model-controller-grid-publisher
+        spec:
+          remediationAction: enforce
+          severity: medium
+          object-templates:
+            # mustonlyhave: this ClusterRole is tenant-owned, so Git is the whole truth of its rules.
+            - complianceType: mustonlyhave
+              metadataComplianceType: musthave
+              objectDefinition:
+                apiVersion: rbac.authorization.k8s.io/v1
+                kind: ClusterRole
+                metadata:
+                  name: odh-model-controller-grid-publisher
+                rules:
+                  - apiGroups:
+                      - serving.opendatahub.io
+                    resources:
+                      - models
+                    verbs:
+                      - post
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: rbac.authorization.k8s.io/v1
+                kind: ClusterRoleBinding
+                metadata:
+                  name: odh-model-controller-grid-publisher
+                roleRef:
+                  apiGroup: rbac.authorization.k8s.io
+                  kind: ClusterRole
+                  name: odh-model-controller-grid-publisher
+                subjects:
+                  - kind: ServiceAccount
+                    name: odh-model-controller
+                    namespace: redhat-ods-applications
     - objectDefinition:
         apiVersion: policy.open-cluster-management.io/v1
         kind: ConfigurationPolicy

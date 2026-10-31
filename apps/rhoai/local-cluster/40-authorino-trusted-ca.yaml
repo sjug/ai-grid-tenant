@@ -1,0 +1,29 @@
+# Authorino needs two trust anchors the image's system roots lack: the cluster's
+# own ingress CA, to reach Keycloak's Route for OpenID discovery (otherwise every
+# MaaS API call is 401 "certificate signed by unknown authority"), and the
+# OpenShift Service CA, to call the MaaS API's internal key-validation endpoint
+# over HTTPS (otherwise API-key requests are 403 after "cannot fetch metadata").
+# The Authorino CR exposes no environment field, but it does mount volumes: mount
+# the network operator's cluster bundle (system roots plus the proxy trustedCA,
+# which the hub bootstrap sets to the ingress CA) and the service CA together over
+# the image's default CA directory, where Go loads every file. A server-side-apply
+# partial, like the upstream chart's Deployment patch, because the RHCL operator
+# owns the CR. The upstream knob authorinoServiceCaTrust covers only the service
+# CA and only renders with the chart's argocd.enabled.
+apiVersion: operator.authorino.kuadrant.io/v1beta1
+kind: Authorino
+metadata:
+  name: authorino
+  namespace: kuadrant-system
+  annotations:
+    argocd.argoproj.io/sync-options: ServerSideApply=true,Validate=false,DisableClientSideApplyMigration=true,Prune=false,Delete=false
+    argocd.argoproj.io/sync-wave: "10"
+spec:
+  volumes:
+    defaultMode: 420
+    items:
+      - name: trusted-ca-bundle
+        mountPath: /etc/pki/tls/certs
+        configMaps:
+          - odh-trusted-ca-bundle
+          - openshift-service-ca.crt
