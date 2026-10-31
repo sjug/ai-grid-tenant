@@ -122,6 +122,60 @@ spec:
           hs.message = "DataScienceCluster reconciliation failed"
           return hs
         end
+        for _, c in ipairs(obj.status.conditions) do
+          if c.type == "Degraded" and c.status == "True" then
+            hs.status = "Degraded"
+            hs.message = c.message or "DataScienceCluster is degraded"
+            return hs
+          end
+        end
+        if obj.status.phase == "Not Ready" then
+          -- An inference-only site (MaaS Removed) runs the AI Gateway module for the
+          -- grid alone; RHOAI 3.6 reports AIGatewayReady=False "0/0 deployments ready"
+          -- and the DSC never reaches Ready although KServe and the grid are up (see
+          -- apps/ai-grid-policies/manifests/20-ai-grid-ready.yaml). Only that exact
+          -- shape is Healthy: MaaS Removed in the spec, the three aggregate conditions
+          -- present with their known messages, serving and grid True, and nothing else
+          -- not ready except Removed modules and the two optional-feature preconditions.
+          -- The Argo Lua sandbox has no string library, so every test is an equality.
+          local maas = obj.spec and obj.spec.components and obj.spec.components.aigateway
+            and obj.spec.components.aigateway.modelsAsAService
+            and obj.spec.components.aigateway.modelsAsAService.managementState
+          if maas == "Removed" then
+            local function has(t, status, message)
+              for _, c in ipairs(obj.status.conditions) do
+                if c.type == t then
+                  return c.status == status and (message == nil or c.message == message)
+                end
+              end
+              return false
+            end
+            local shape = has("KserveReady", "True") and has("AIGridReady", "True")
+              and has("ProvisioningSucceeded", "True") and has("ComponentsReady", "True")
+              and has("AIGatewayReady", "False", "0/0 deployments ready")
+              and has("Ready", "False", "Some modules are not ready: aigateway")
+              and has("ModulesReady", "False", "Some modules are not ready: aigateway")
+            if shape then
+              for _, c in ipairs(obj.status.conditions) do
+                if (c.type == "Progressing" or c.type == "Degraded") and c.status ~= "False" then shape = false end
+                if c.status ~= "True" and c.type ~= "AIGatewayReady" and c.type ~= "Ready"
+                  and c.type ~= "ModulesReady" and c.type ~= "Progressing" and c.type ~= "Degraded"
+                  and not (c.status == "False" and c.reason == "Removed") then
+                  -- the only optional-feature preconditions a serving site may fail
+                  local optional = c.status == "False" and c.reason == "PreConditionFailed"
+                    and (c.type == "KserveConfidentialContainerDependencies"
+                      or c.type == "KserveLLMInferenceServiceWideEPDependencies")
+                  if not optional then shape = false end
+                end
+              end
+            end
+            if shape then
+              hs.status = "Healthy"
+              hs.message = "DataScienceCluster serves (AI Gateway module idle: no MaaS on this site)"
+              return hs
+            end
+          end
+        end
         if obj.status.phase == "Progressing" or obj.status.phase == "Not Ready" then
           hs.status = "Progressing"
           hs.message = "DataScienceCluster phase: " .. obj.status.phase
