@@ -276,7 +276,8 @@ spec:
             {{- if $sourceAuth -}}
             {{- $_ := set $preRelease "quay.io/rhoai" $sourceAuth -}}
             {{- end -}}
-            {{- $mergedAuths := mustMerge (index $globalConfig "auths") $preRelease -}}
+            {{- /* Sprig merge gives the first argument precedence: the hub-held credentials must win for the registries they cover (quay.io/rhoai, registry.stage.redhat.io), otherwise a rotated or corrected credential never reaches the nodes. */ -}}
+            {{- $mergedAuths := mustMerge $preRelease (index $globalConfig "auths") -}}
             {{- $mergedConfig := mustMerge $globalConfig (dict "auths" $mergedAuths) -}}
             - complianceType: musthave
               objectDefinition:
