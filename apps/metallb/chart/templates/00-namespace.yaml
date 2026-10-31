@@ -12,6 +12,8 @@ metadata:
   namespace: metallb-system
   annotations:
     argocd.argoproj.io/sync-wave: "0"
+# The MetalLB operator supports only the AllNamespaces install mode; an
+# OperatorGroup that targets its own namespace leaves the CSV Failed with
+# UnsupportedOperatorGroup. No targetNamespaces selects AllNamespaces.
 spec:
-  targetNamespaces:
-    - metallb-system
+  upgradeStrategy: Default
