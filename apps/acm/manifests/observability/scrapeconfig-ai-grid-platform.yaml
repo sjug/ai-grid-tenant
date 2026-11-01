@@ -31,7 +31,8 @@ spec:
           - '{__name__=~"istio_requests_total|istio_request_duration_milliseconds_.*|istio_request_bytes_.*|istio_response_bytes_.*|istio_tcp_.*"}'
           - '{__name__=~"istio_agent_.*|istio_build|pilot_.*"}'
           - '{__name__=~"envoy_cluster_upstream_(cx_active|cx_connect_fail|cx_overflow|cx_total|rq_active|rq_pending_.*|rq_retry.*|rq_time.*|rq_timeout|rq_total|rq_5xx|rq_4xx|rq_completed)"}'
-          - '{__name__=~"envoy_http_downstream_(cx_active|cx_total|cx_overflow|rq_active|rq_total|rq_time.*|rq_5xx|rq_4xx|rq_2xx)"}'
+          # Istio's inclusion list emits no per-class counters (rq_2xx and friends); classes come from istio_requests_total.
+          - '{__name__=~"envoy_http_downstream_(cx_active|cx_total|cx_overflow|rq_active|rq_total|rq_completed|rq_time.*)"}'
           - '{__name__=~"envoy_listener_downstream_cx_(active|total|overflow)|envoy_listener_.*_downstream_cx_(active|total|overflow)|envoy_listener_manager_.*"}'
           - '{__name__=~"envoy_server_(memory_.*|live|concurrency|total_connections|uptime|hot_restart_epoch|version)"}'
           # Filter statistics: the Kuadrant wasm shim, external processing (payload processing), external
@@ -58,6 +59,9 @@ spec:
           # The MCO ServiceMonitors rename the Thanos and Observatorium metrics with an acm_ prefix.
           - '{__name__=~"acm_thanos_.*|acm_observatorium_.*",namespace="open-cluster-management-observability"}'
           - '{__name__=~"ovnkube_controller_.*|ovn_controller_.*"}'
+          # RHOAI's MaaS and AI gateway controllers (redhat-ods-applications carries openshift.io/cluster-monitoring,
+          # so the platform Prometheus scrapes their ServiceMonitors): reconcile counts, errors and durations, queue depth.
+          - '{__name__=~"controller_runtime_(reconcile_total|reconcile_errors_total|reconcile_time_seconds_(bucket|sum|count)|active_workers|max_concurrent_reconciles)|workqueue_(depth|adds_total|queue_duration_seconds_(bucket|sum|count)|retries_total)|rest_client_requests_total",namespace="redhat-ods-applications"}'
   # Both Kuadrant's istio-pod-monitor (MaaS sites) and the ai-grid gateway PodMonitor (inference sites)
   # deliver the full gateway Envoy statistics; RHOAI's openshift-ai-inference-metrics PodMonitor delivers the
   # Istio request families once more for the serving gateway. One copy per site reaches the hub.

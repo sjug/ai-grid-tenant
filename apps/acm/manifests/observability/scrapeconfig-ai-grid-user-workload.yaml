@@ -35,7 +35,9 @@ spec:
           - '{__name__=~"metallb_.*|frrk8s_.*"}'
           - '{__name__=~"inference_.*|epp_.*|llm_d_epp_.*|llm_d_.*"}'
           - '{__name__=~"vllm:.*"}'
-          - '{__name__=~"maas_.*|active_.*|datastore_.*|dns_.*|leader_.*"}'
+          # maas-api (its own ServiceMonitor on the ingress sites, apps/rhoai-prerequisites/hub/11-maas-api-metrics-policy.yaml):
+          # key minting and validation, request latency and rejections, the SubjectAccessReview cache.
+          - '{__name__=~"maas_.*|sar_cache_.*|active_.*|datastore_.*|dns_.*|leader_.*"}'
           # The Limitador Redis exporter (hub): latency, clients, memory, evictions, keyspace.
           - '{__name__=~"redis_.*",namespace="limitador-redis"}'
           - '{__name__=~"controller_runtime_.*|workqueue_.*|rest_client_requests_total",namespace=~"redhat-ai-grid|redhat-ai-gateway-infra|models-as-a-service|kuadrant-system|maas-db|redhat-ods-applications|metallb-system"}'

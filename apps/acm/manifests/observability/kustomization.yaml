@@ -8,3 +8,4 @@ resources:
   - observability-bridge-rbac.yaml
   - scrapeconfig-ai-grid-platform.yaml
   - scrapeconfig-ai-grid-user-workload.yaml
+  - dashboards

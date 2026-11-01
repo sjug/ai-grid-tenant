@@ -1,0 +1,171 @@
+# maas-api's own metrics (API-key minting and validation, request latency and rejections, the SAR cache) on
+# the ingress sites. RHOAI ships ServiceMonitor maas-api-metrics for it, but that object reads the scraper's
+# token from a file (bearerTokenFile), which user-workload monitoring's Prometheus Operator rejects, so only
+# RHOAI's own Prometheus scrapes it and nothing reaches the hub. This ServiceMonitor authenticates with the
+# token of a service account of its own (a service-account-token Secret the cluster populates; Git holds no
+# secret), which the ClusterRole below lets read /metrics (maas-api answers 401 without a token and checks
+# the nonResourceURL with a SubjectAccessReview). RHOAI's NetworkPolicy opens 9090 to redhat-ods-monitoring
+# alone; the one below admits the monitoring namespaces (openshift-monitoring and user-workload monitoring
+# carry the policy-group label).
+apiVersion: cluster.open-cluster-management.io/v1beta1
+kind: Placement
+metadata:
+  name: rhoai-ingress-sites
+  namespace: rhoai-prerequisites
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+spec:
+  clusterSets:
+    - global
+  predicates:
+    - requiredClusterSelector:
+        labelSelector:
+          matchLabels:
+            ai-grid/enabled: "true"
+          matchExpressions:
+            - key: ai-grid/role
+              operator: In
+              values: [ingress, combined]
+---
+apiVersion: policy.open-cluster-management.io/v1
+kind: Policy
+metadata:
+  name: rhoai-maas-api-metrics
+  namespace: rhoai-prerequisites
+  annotations:
+    argocd.argoproj.io/sync-wave: "4"
+spec:
+  disabled: false
+  remediationAction: enforce
+  policy-templates:
+    - objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1
+        kind: ConfigurationPolicy
+        metadata:
+          name: rhoai-maas-api-metrics
+        spec:
+          remediationAction: enforce
+          severity: medium
+          object-templates:
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: v1
+                kind: ServiceAccount
+                metadata:
+                  name: ai-grid-maas-api-metrics
+                  namespace: redhat-ai-gateway-infra
+                  labels:
+                    app.kubernetes.io/part-of: ai-grid
+            # The token controller fills data.token and data.ca.crt for a Secret of this type; the policy
+            # compares only the fields written here.
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: v1
+                kind: Secret
+                type: kubernetes.io/service-account-token
+                metadata:
+                  name: ai-grid-maas-api-metrics-token
+                  namespace: redhat-ai-gateway-infra
+                  labels:
+                    app.kubernetes.io/part-of: ai-grid
+                  annotations:
+                    kubernetes.io/service-account.name: ai-grid-maas-api-metrics
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: rbac.authorization.k8s.io/v1
+                kind: ClusterRole
+                metadata:
+                  name: ai-grid-metrics-reader
+                  labels:
+                    app.kubernetes.io/part-of: ai-grid
+                rules:
+                  - nonResourceURLs: ["/metrics"]
+                    verbs: ["get"]
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: rbac.authorization.k8s.io/v1
+                kind: ClusterRoleBinding
+                metadata:
+                  name: ai-grid-maas-api-metrics
+                  labels:
+                    app.kubernetes.io/part-of: ai-grid
+                roleRef:
+                  apiGroup: rbac.authorization.k8s.io
+                  kind: ClusterRole
+                  name: ai-grid-metrics-reader
+                subjects:
+                  - kind: ServiceAccount
+                    name: ai-grid-maas-api-metrics
+                    namespace: redhat-ai-gateway-infra
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: networking.k8s.io/v1
+                kind: NetworkPolicy
+                metadata:
+                  name: ai-grid-maas-api-allow-monitoring
+                  namespace: redhat-ai-gateway-infra
+                  labels:
+                    app.kubernetes.io/part-of: ai-grid
+                spec:
+                  podSelector:
+                    matchLabels:
+                      app.kubernetes.io/component: api
+                      app.kubernetes.io/name: maas-api
+                      app.kubernetes.io/part-of: models-as-a-service
+                  policyTypes: [Ingress]
+                  ingress:
+                    - from:
+                        - namespaceSelector:
+                            matchLabels:
+                              network.openshift.io/policy-group: monitoring
+                      ports:
+                        - protocol: TCP
+                          port: 9090
+            # Same Service, port, path, CA and server name as RHOAI's maas-api-metrics; the token comes from
+            # the Secret above instead of a file.
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: monitoring.coreos.com/v1
+                kind: ServiceMonitor
+                metadata:
+                  name: ai-grid-maas-api-metrics
+                  namespace: redhat-ai-gateway-infra
+                  labels:
+                    app.kubernetes.io/part-of: ai-grid
+                spec:
+                  selector:
+                    matchLabels:
+                      app.kubernetes.io/name: maas-api
+                      maas.opendatahub.io/metrics: "true"
+                  endpoints:
+                    - port: https
+                      path: /metrics
+                      scheme: https
+                      interval: 30s
+                      authorization:
+                        type: Bearer
+                        credentials:
+                          name: ai-grid-maas-api-metrics-token
+                          key: token
+                      tlsConfig:
+                        ca:
+                          configMap:
+                            name: openshift-service-ca.crt
+                            key: service-ca.crt
+                        serverName: maas-api-metrics.redhat-ai-gateway-infra.svc
+---
+apiVersion: policy.open-cluster-management.io/v1
+kind: PlacementBinding
+metadata:
+  name: rhoai-maas-api-metrics
+  namespace: rhoai-prerequisites
+  annotations:
+    argocd.argoproj.io/sync-wave: "3"
+placementRef:
+  apiGroup: cluster.open-cluster-management.io
+  kind: Placement
+  name: rhoai-ingress-sites
+subjects:
+  - apiGroup: policy.open-cluster-management.io
+    kind: Policy
+    name: rhoai-maas-api-metrics
