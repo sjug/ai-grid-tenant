@@ -55,8 +55,16 @@ spec:
           # The collection path itself: the addon's agents (their own metrics are scraped by the platform
           # Prometheus, not by user-workload monitoring) and, on the hub, Thanos.
           - '{__name__=~"prometheus_(remote_storage_.*|agent_.*|tsdb_head_series|target_scrapes_.*|target_scrape_pool_targets|sd_discovered_targets)",namespace="open-cluster-management-agent-addon"}'
-          - '{__name__=~"thanos_(receive|compact|store|query|objstore)_.*",namespace="open-cluster-management-observability"}'
+          # The MCO ServiceMonitors rename the Thanos and Observatorium metrics with an acm_ prefix.
+          - '{__name__=~"acm_thanos_.*|acm_observatorium_.*",namespace="open-cluster-management-observability"}'
           - '{__name__=~"ovnkube_controller_.*|ovn_controller_.*"}'
+  # Both Kuadrant's istio-pod-monitor (MaaS sites) and the ai-grid gateway PodMonitor (inference sites)
+  # deliver the full gateway Envoy statistics; RHOAI's openshift-ai-inference-metrics PodMonitor delivers the
+  # Istio request families once more for the serving gateway. One copy per site reaches the hub.
+  metricRelabelings:
+    - action: drop
+      sourceLabels: [__name__, job]
+      regex: '(istio_requests_total|istio_request_duration_milliseconds_(bucket|sum|count)|istio_request_bytes_(bucket|sum|count)|istio_response_bytes_(bucket|sum|count));openshift-ingress/openshift-ai-inference-metrics'
   staticConfigs:
     - targets:
         - not-configurable

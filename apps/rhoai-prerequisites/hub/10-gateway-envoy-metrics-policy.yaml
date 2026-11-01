@@ -2,8 +2,9 @@
 # memory) on inference-only sites. Kuadrant's istio-pod-monitor provides them where MaaS runs (ingress and
 # combined sites); an inference site has only RHOAI's openshift-ai-inference-metrics PodMonitor, which keeps
 # the Istio request families alone, so its gateway's Envoy filter statistics were never scraped. This
-# PodMonitor goes to inference sites only (no overlap with Kuadrant's), uses its own name, and drops the
-# Istio request families RHOAI's monitor already delivers (no duplicate series).
+# PodMonitor goes to inference sites only (no overlap with Kuadrant's) and uses its own name; it is the single
+# full source there, like Kuadrant's on MaaS sites, and the ACM platform job drops RHOAI's duplicate copies of
+# the Istio request families centrally.
 apiVersion: cluster.open-cluster-management.io/v1beta1
 kind: Placement
 metadata:
@@ -44,7 +45,9 @@ spec:
           remediationAction: enforce
           severity: medium
           object-templates:
-            - complianceType: musthave
+            # mustonlyhave: this object is entirely ours, and a field dropped from the template (such as a
+            # metricRelabelings rule) must leave the live object too, which musthave would never do.
+            - complianceType: mustonlyhave
               objectDefinition:
                 apiVersion: monitoring.coreos.com/v1
                 kind: PodMonitor
@@ -91,11 +94,6 @@ spec:
                         - action: replace
                           sourceLabels: [__meta_kubernetes_pod_name]
                           targetLabel: pod
-                      metricRelabelings:
-                        # RHOAI's openshift-ai-inference-metrics PodMonitor already keeps these four families.
-                        - action: drop
-                          sourceLabels: [__name__]
-                          regex: 'istio_requests_total|istio_request_duration_milliseconds_(bucket|sum|count)|istio_request_bytes_(bucket|sum|count)|istio_response_bytes_(bucket|sum|count)'
     - objectDefinition:
         apiVersion: policy.open-cluster-management.io/v1
         kind: ConfigurationPolicy

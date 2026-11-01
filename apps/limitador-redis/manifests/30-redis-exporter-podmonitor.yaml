@@ -1,0 +1,17 @@
+# User-workload monitoring scrapes the Redis exporter sidecars of the replication set.
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: limitador-redis-exporter
+  namespace: limitador-redis
+  annotations:
+    argocd.argoproj.io/sync-wave: "4"
+spec:
+  selector:
+    matchLabels:
+      app: limitador-redis
+      redis_setup_type: replication
+  podMetricsEndpoints:
+    - port: redis-exporter
+      path: /metrics
+      interval: 30s

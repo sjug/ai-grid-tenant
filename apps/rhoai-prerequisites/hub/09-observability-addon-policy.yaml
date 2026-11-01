@@ -1,4 +1,6 @@
-# Registers the AI Grid ScrapeConfigs with the multicluster observability addon. ACM 2.17 copies a
+# Registers the AI Grid ScrapeConfigs with the multicluster observability addon. (RHOAI's rhai-metrics
+# exporter job is not registered: this RHOAI build deploys no data-science-collector, so the target has
+# no endpoints; see runbooks/followups/rhoai-collector-absent.md in the deployment notes.) ACM 2.17 copies a
 # custom ScrapeConfig to the managed clusters only when it is listed under the addon's placement
 # configs (the component label then picks the platform or user-workload agent). The
 # ClusterManagementAddOn is owned by the MultiClusterObservability operator and its configs list is
@@ -60,10 +62,6 @@ spec:
                             resource: scrapeconfigs
                             namespace: open-cluster-management-observability
                             name: ai-grid-user-workload-metrics
-                          - group: monitoring.rhobs
-                            resource: scrapeconfigs
-                            namespace: open-cluster-management-observability
-                            name: rhai-metrics
 ---
 apiVersion: policy.open-cluster-management.io/v1
 kind: PlacementBinding

@@ -31,6 +31,18 @@ spec:
     periodSeconds: 10
     timeoutSeconds: 3
     failureThreshold: 3
+  # Exporter sidecar (port 9121): latency, connected clients, memory, evictions, keyspace for the shared
+  # rate-limit store, scraped by user-workload monitoring (PodMonitor 30-redis-exporter-podmonitor.yaml).
+  redisExporter:
+    enabled: true
+    image: quay.io/opstree/redis-exporter@sha256:a63d2b6e946f8b82467ec5f853c24ab994b7cab5eacc3c3cbaa50e49bd27f235 # v1.44.0
+    resources:
+      requests:
+        cpu: 50m
+        memory: 64Mi
+      limits:
+        cpu: 250m
+        memory: 128Mi
   redisConfig:
     dynamicConfig:
       - "maxmemory 6gb"

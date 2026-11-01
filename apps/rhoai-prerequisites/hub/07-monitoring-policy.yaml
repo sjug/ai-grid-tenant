@@ -98,38 +98,3 @@ spec:
                   name: cluster-observability-operator
                   source: redhat-operators
                   sourceNamespace: openshift-marketplace
-    - objectDefinition:
-        apiVersion: policy.open-cluster-management.io/v1
-        kind: ConfigurationPolicy
-        metadata:
-          name: rhoai-collector-federation
-        spec:
-          remediationAction: enforce
-          severity: medium
-          object-templates:
-            # The ACM user-workload agent federates RHOAI's collector exporter (ScrapeConfig rhai-metrics
-            # in apps/ai-grid-o11y) on every site; the hub carries the same policy from that app.
-            - complianceType: musthave
-              objectDefinition:
-                apiVersion: networking.k8s.io/v1
-                kind: NetworkPolicy
-                metadata:
-                  name: allow-acm-rhai-metrics
-                  namespace: redhat-ods-monitoring
-                  labels:
-                    app.kubernetes.io/component: user-workload-metrics-collector
-                spec:
-                  podSelector:
-                    matchLabels:
-                      app.kubernetes.io/instance: redhat-ods-monitoring.data-science-collector
-                      app.kubernetes.io/component: opentelemetry-collector
-                  policyTypes:
-                    - Ingress
-                  ingress:
-                    - from:
-                        - namespaceSelector:
-                            matchLabels:
-                              kubernetes.io/metadata.name: open-cluster-management-agent-addon
-                      ports:
-                        - port: 8889
-                          protocol: TCP

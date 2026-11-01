@@ -22,3 +22,11 @@ spec:
           podSelector:
             matchLabels:
               app: limitador
+    # The cluster's monitoring (user-workload Prometheus) scrapes the exporter sidecar only.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              network.openshift.io/policy-group: monitoring
+      ports:
+        - port: 9121
+          protocol: TCP

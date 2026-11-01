@@ -4,15 +4,9 @@ metadata:
   name: rhai-metrics
   namespace: open-cluster-management-observability
   labels:
-    # The component label picks the addon's user-workload agent; the copy to the managed clusters
-    # comes from the entry under the ClusterManagementAddOn's placement configs
-    # (apps/rhoai-prerequisites/hub/09-observability-addon-policy.yaml).
     app.kubernetes.io/component: user-workload-metrics-collector
-    app.kubernetes.io/part-of: multicluster-observability-addon
 spec:
   jobName: rhai-metrics
-  # The agents' default cadence is 300 s; the performance campaign reads this job at 30 s.
-  scrapeInterval: 30s
   metricsPath: /metrics
   params:
     match[]:

@@ -36,12 +36,12 @@ spec:
           - '{__name__=~"inference_.*|epp_.*|llm_d_epp_.*|llm_d_.*"}'
           - '{__name__=~"vllm:.*"}'
           - '{__name__=~"maas_.*|active_.*|datastore_.*|dns_.*|leader_.*"}'
+          # The Limitador Redis exporter (hub): latency, clients, memory, evictions, keyspace.
+          - '{__name__=~"redis_.*",namespace="limitador-redis"}'
           - '{__name__=~"controller_runtime_.*|workqueue_.*|rest_client_requests_total",namespace=~"redhat-ai-grid|redhat-ai-gateway-infra|models-as-a-service|kuadrant-system|maas-db|redhat-ods-applications|metallb-system"}'
           - '{__name__=~"process_.*|go_goroutines|go_memstats_heap_inuse_bytes|go_memstats_alloc_bytes|go_gc_duration_seconds.*|grpc_server_.*",namespace=~"redhat-ai-grid|redhat-ai-gateway-infra|models-as-a-service|kuadrant-system|maas-db|ai-grid-internal-models|metallb-system"}'
           - '{__name__=~"up|scrape_duration_seconds|scrape_samples_scraped",namespace=~"redhat-ai-grid|redhat-ai-gateway-infra|models-as-a-service|kuadrant-system|maas-db|ai-grid-internal-models|metallb-system|open-cluster-management-agent-addon|open-cluster-management-observability"}'
-          # The collection path itself: the addon's Prometheus agents (remote write to the hub) and, on the hub, Thanos.
-          - '{__name__=~"prometheus_(tsdb_head_series|tsdb_head_samples_appended_total|target_scrapes_.*|target_scrape_pool_targets|remote_storage_.*|agent_.*)",namespace=~"open-cluster-management-agent-addon|open-cluster-management-observability"}'
-          - '{__name__=~"thanos_(receive|compact|store|query|objstore)_.*",namespace="open-cluster-management-observability"}'
+
   staticConfigs:
     - targets:
         - prometheus-user-workload.openshift-user-workload-monitoring.svc:9092
