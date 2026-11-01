@@ -61,9 +61,12 @@ spec:
   # Both Kuadrant's istio-pod-monitor (MaaS sites) and the ai-grid gateway PodMonitor (inference sites)
   # deliver the full gateway Envoy statistics; RHOAI's openshift-ai-inference-metrics PodMonitor delivers the
   # Istio request families once more for the serving gateway. One copy per site reaches the hub.
+  # The agents federate without honor_labels: when this rule runs, the source job name is in exported_job
+  # (job already carries this ScrapeConfig's own name); the agents' remote-write relabeling restores it to
+  # job afterwards, which is why the hub's Thanos shows the source job names.
   metricRelabelings:
     - action: drop
-      sourceLabels: [__name__, job]
+      sourceLabels: [__name__, exported_job]
       regex: '(istio_requests_total|istio_request_duration_milliseconds_(bucket|sum|count)|istio_request_bytes_(bucket|sum|count)|istio_response_bytes_(bucket|sum|count));openshift-ingress/openshift-ai-inference-metrics'
   staticConfigs:
     - targets:
