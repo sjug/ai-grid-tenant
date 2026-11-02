@@ -1,0 +1,8 @@
+apiVersion: objectbucket.io/v1alpha1
+kind: ObjectBucketClaim
+metadata:
+  name: usage-logs-bucket
+  namespace: ai-grid-o11y
+spec:
+  generateBucketName: usage-logs
+  storageClassName: openshift-storage.noobaa.io

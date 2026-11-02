@@ -5,6 +5,8 @@ on:
   workflow_dispatch: {}
 jobs:
   renovate:
+    # The config names the upstream repository; a fork's GITHUB_TOKEN cannot maintain it.
+    if: github.repository == 'ai-grid-cloud/ai-grid-cluster-gitops'
     runs-on: ubuntu-latest
     permissions:
       contents: write

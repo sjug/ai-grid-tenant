@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: openshift-service-ca-bundle
+  namespace: ai-grid-o11y
+  annotations:
+    service.beta.openshift.io/inject-cabundle: "true"

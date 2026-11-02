@@ -1,7 +1,7 @@
 module.exports = {
   platform: 'github',
   repositories: [
-    'kahowell/ai-grid-tenant'
+    'ai-grid-cloud/ai-grid-cluster-gitops'
   ],
   hostRules: [
     {

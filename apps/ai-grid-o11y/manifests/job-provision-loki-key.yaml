@@ -1,0 +1,50 @@
+# Turns the bucket claim's generated credentials into the LokiStack's object-storage Secret.
+# Sync hook in wave 1: it runs after the wave-0 objects (bucket claim, RBAC, CA bundle) are applied and
+# before the LokiStack (wave 2), and it waits for the claim to be Bound instead of failing on an empty read.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  generateName: provision-loki-s3-secret-
+  namespace: ai-grid-o11y
+  annotations:
+    argocd.argoproj.io/hook: Sync
+    argocd.argoproj.io/sync-wave: "1"
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation,HookSucceeded
+spec:
+  activeDeadlineSeconds: 900
+  backoffLimit: 1
+  template:
+    spec:
+      serviceAccountName: provision-loki-key
+      restartPolicy: Never
+      containers:
+        - name: create-secret
+          # The cluster's own CLI image (OpenShift 4.22.20 release payload), pinned by digest; upstream uses
+          # registry.redhat.io/openshift4/ose-cli:latest.
+          image: quay.io/openshift-release-dev/ocp-v4.0-art-dev@sha256:b923153c0f976e347851bf821c69b79bd67560c64af60774f72ecd1e761c0424
+          command: ["/bin/bash", "-c"]
+          args:
+            - |
+              set -euo pipefail
+              O11Y_NS=ai-grid-o11y
+              LOKI_NAME=usage-logs
+              oc() { command oc --request-timeout=15s "$@"; }
+              phase=""
+              for i in $(seq 1 80); do
+                phase=$(oc get objectbucketclaim ${LOKI_NAME}-bucket -n "$O11Y_NS" -o jsonpath='{.status.phase}' 2>/dev/null || true)
+                [ "$phase" = Bound ] && break
+                echo "bucket claim phase '${phase:-absent}', waiting ($i)"; sleep 10
+              done
+              [ "$phase" = Bound ] || { echo "bucket claim not Bound" >&2; exit 1; }
+              BUCKET=$(oc get cm ${LOKI_NAME}-bucket -n "$O11Y_NS" -o jsonpath='{.data.BUCKET_NAME}')
+              AK=$(oc get secret ${LOKI_NAME}-bucket -n "$O11Y_NS" -o jsonpath='{.data.AWS_ACCESS_KEY_ID}' | base64 -d)
+              SK=$(oc get secret ${LOKI_NAME}-bucket -n "$O11Y_NS" -o jsonpath='{.data.AWS_SECRET_ACCESS_KEY}' | base64 -d)
+              [ -n "$BUCKET" ] && [ -n "$AK" ] && [ -n "$SK" ] || { echo "bucket claim Bound but credentials empty" >&2; exit 1; }
+              oc create secret generic ${LOKI_NAME}-object-storage -n "$O11Y_NS" \
+                --from-literal=bucketnames="$BUCKET" \
+                --from-literal=endpoint="https://s3.openshift-storage.svc:443" \
+                --from-literal=access_key_id="$AK" \
+                --from-literal=access_key_secret="$SK" \
+                --dry-run=client -o yaml | oc apply -f -
+              oc get secret ${LOKI_NAME}-object-storage -n "$O11Y_NS" -o jsonpath='{.data.bucketnames}' | grep -q . || { echo "object-storage Secret not written" >&2; exit 1; }
+              echo "object-storage Secret for bucket ${BUCKET} ready"

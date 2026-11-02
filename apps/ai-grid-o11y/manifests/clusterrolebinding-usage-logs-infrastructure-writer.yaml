@@ -1,0 +1,12 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: usage-logs-infrastructure-writer
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: usage-logs-infrastructure-writer
+subjects:
+  - kind: ServiceAccount
+    name: usage-logs-writer
+    namespace: ai-grid-o11y
