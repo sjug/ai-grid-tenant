@@ -103,3 +103,14 @@ sites with role ingress or combined.
 image mirror and the pull secret, and its `rhoai-limitador-redis` Policy on
 every cluster but the hub), Submariner, the sample models and Argo CD's cluster
 registration still go to every managed cluster, site or not.
+
+## Changing a site to ingress or combined
+
+The MaaS it gains validates users against the home's Keycloak over the home's
+Route. If that Route's certificate is not publicly trusted, the site's cluster
+trust must carry the home's ingress CA before the role is set; the procedure
+is in `docs/acm/cluster-onboarding/README.md` ("Trusting the MaaS home's
+ingress CA"). `apps/rhoai/maas-sites` then mounts the cluster trust bundle and
+the service CA into the site's Authorino; a site that already mounts volumes
+into Authorino lists them in `apps/rhoai/maas-sites/values-<cluster>.yaml`
+under `authorino.extraVolumeItems`.

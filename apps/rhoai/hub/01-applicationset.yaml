@@ -87,6 +87,21 @@ spec:
           path: apps/rhoai/local-cluster
           directory:
             exclude: '{{ if eq (index .metadata.labels "local-cluster") "true" }}{{ else }}*{{ end }}'
+        # MaaS sites (role ingress or combined, the hub included) get the Authorino
+        # trust patch; an inference site runs no MaaS and renders nothing.
+        - repoURL: https://github.com/ai-grid-cloud/ai-grid-cluster-gitops.git
+          targetRevision: HEAD
+          path: apps/rhoai/maas-sites
+          helm:
+            releaseName: maas-sites
+            # Per-site overrides (for example authorino.extraVolumeItems) live in
+            # apps/rhoai/maas-sites/values-<cluster>.yaml; absent files are ignored.
+            ignoreMissingValueFiles: true
+            valueFiles:
+              - $values/apps/rhoai/maas-sites/values-{{ .name }}.yaml
+            parameters:
+              - name: enabled
+                value: '{{ if eq (index .metadata.labels "ai-grid/role") "inference" }}false{{ else }}true{{ end }}'
         - repoURL: https://github.com/ai-grid-cloud/ai-grid-cluster-gitops.git
           targetRevision: HEAD
           path: apps/rhoai/catalog

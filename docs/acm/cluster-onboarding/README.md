@@ -37,6 +37,14 @@ as an override when present.
 
 ## What the site must provide
 
+- For an ingress or combined site whose MaaS home serves Keycloak behind a
+  privately signed ingress certificate: the cluster trust must include the
+  home's ingress CA before tenants use MaaS ("Trusting the MaaS home's
+  ingress CA" below): on a site that already runs Authorino, before the role
+  changes; on a fresh site, right after the role label, since the ConfigMaps
+  the trust step needs appear with the role's operators. With a publicly
+  trusted certificate nothing is needed.
+
 - A default StorageClass. RHOAI monitoring claims 20Gi for metrics and 10Gi for
   traces on every site. An ingress or combined site claims 20Gi for its MaaS
   database replica. The sample models pull weights at start and claim nothing.
@@ -56,6 +64,49 @@ Still per site, on the hub:
   so other sites can route to this site's models. Members do not report their
   gateway address yet.
 - The provider gateway NetworkPolicy CIDR, for a site outside the lab VPC.
+
+## Trusting the MaaS home's ingress CA
+
+Authorino on a MaaS site performs OpenID discovery against the MaaS home's
+Keycloak Route and validates API keys against maas-api over the OpenShift
+service CA. The trust patch in `apps/rhoai/maas-sites` mounts two ConfigMaps
+for that, `odh-trusted-ca-bundle` and `openshift-service-ca.crt`, which must
+exist in the Authorino namespace of every ingress or combined site.
+
+If the home's Keycloak Route presents a certificate that chains to a public
+root, nothing else is needed. Otherwise the CA that issued that certificate
+must be in the site's cluster trust, which RHOAI copies into
+`odh-trusted-ca-bundle`. `trust-maas-home-ca.sh` in this directory does that,
+with `KUBECONFIG` pointing at the site:
+
+```
+HOME_KUBECONFIG=<home kubeconfig> KEYCLOAK_HOST=<home Keycloak Route host> REALM=<MaaS realm> \
+  docs/acm/cluster-onboarding/trust-maas-home-ca.sh
+```
+
+A home that replaced its default ingress certificate passes
+`HOME_CA_FILE=<PEM bundle of the replacement's issuer>` instead of
+`HOME_KUBECONFIG`. The script stops at the first failure and writes nothing
+before every read has succeeded: it checks the two ConfigMaps, obtains and
+validates the issuing CA, reads the bundle `proxy/cluster` names and any
+existing `custom-ca` on their own (only NotFound counts as absent; a bundle
+named by the proxy next to a separate `custom-ca` is refused rather than
+hidden), validates every existing bundle, appends the CA, parses and
+fingerprints the merged bundle, writes `custom-ca` and points `proxy/cluster`
+at it, waits (bounded, default 15 minutes, every request and sleep capped to
+the remaining budget) until every certificate of the merged bundle appears by
+SHA-256 fingerprint in the mounted `odh-trusted-ca-bundle`, and finally
+verifies a TLS connection to the home's OpenID discovery document with
+exactly that bundle. On a site that already runs Authorino, run it before
+changing the role; on a fresh site the ConfigMaps appear with the role's
+operators, so run it right after the role label and before onboarding
+tenants.
+`tests/trust-maas-home-ca-test.sh` exercises it against stub `oc` and `curl`
+binaries with real certificates.
+
+A site that already mounts volumes into Authorino lists them in
+`apps/rhoai/maas-sites/values-<cluster>.yaml` under `authorino.extraVolumeItems`;
+the trust patch owns the CR's volume list and would otherwise replace them.
 
 ## Prerequisites
 

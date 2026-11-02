@@ -1,0 +1,25 @@
+{{- if .Values.enabled }}
+# Authorino's image lacks two trust anchors: the MaaS home's ingress CA (Keycloak discovery,
+# else 401) and the service CA (the MaaS API's internal endpoint, else 403). The CR has no env
+# field, so both ConfigMaps are mounted over the image's CA directory. Server-side-apply partial:
+# the RHCL operator owns the CR, this chart owns spec.volumes; existing mounts go in extraVolumeItems.
+apiVersion: operator.authorino.kuadrant.io/v1beta1
+kind: Authorino
+metadata:
+  name: {{ .Values.authorino.name }}
+  namespace: {{ .Values.authorino.namespace }}
+  annotations:
+    argocd.argoproj.io/sync-options: ServerSideApply=true,Validate=false,DisableClientSideApplyMigration=true,Prune=false,Delete=false
+    argocd.argoproj.io/sync-wave: "10"
+spec:
+  volumes:
+    defaultMode: 420
+    items:
+      - name: trusted-ca-bundle
+        mountPath: {{ .Values.authorino.trust.mountPath }}
+        configMaps:
+          {{- toYaml .Values.authorino.trust.configMaps | nindent 10 }}
+      {{- with .Values.authorino.extraVolumeItems }}
+      {{- toYaml . | nindent 6 }}
+      {{- end }}
+{{- end }}
