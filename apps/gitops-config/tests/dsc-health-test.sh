@@ -41,7 +41,8 @@ F = {
   {"ready-false-after-reconcile", dsc("Ready", {{"Ready","False","not ready"},{"Degraded","False"}}, "Managed", 1, 1), "Degraded"},
   {"shape-missing-progressing-condition", dsc("Not Ready", shape({{"Progressing", nil}}), "Removed", 1, 1), "Progressing"},
   {"shape-missing-degraded-condition", dsc("Not Ready", shape({{"Degraded", nil}}), "Removed", 1, 1), "Progressing"},
-  {"shape-missing-observed-generation", dsc("Not Ready", shape(), "Removed", 1, nil), "Progressing"},
+  {"shape-missing-observed-generation", dsc("Not Ready", shape(), "Removed", 2, nil), "Healthy"},
+  {"shape-stale-observed-generation", dsc("Not Ready", shape(), "Removed", 2, 1), "Progressing"},
   {"shape-with-unknown-degraded", dsc("Not Ready", shape({{"Degraded","Unknown"}}), "Removed", 1, 1), "Progressing"},
   {"fixed-build-gateway-ready", dsc("Ready", {{"Ready","True"},{"AIGatewayReady","True"},{"Progressing","False"},{"Degraded","False"}}, "Removed", 1, 1), "Healthy"},
 }

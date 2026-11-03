@@ -137,8 +137,10 @@ spec:
           local maas = obj.spec and obj.spec.components and obj.spec.components.aigateway
             and obj.spec.components.aigateway.modelsAsAService
             and obj.spec.components.aigateway.modelsAsAService.managementState
-          local currentGeneration = obj.metadata.generation ~= nil and obj.status.observedGeneration ~= nil
-            and obj.status.observedGeneration == obj.metadata.generation
+          -- This fork's pinned 3.6 nightly writes status.observedGeneration only after a Ready
+          -- reconcile, which this shape never reaches: absent passes, a stale value still fails.
+          local currentGeneration = obj.status.observedGeneration == nil
+            or (obj.metadata.generation ~= nil and obj.status.observedGeneration == obj.metadata.generation)
           if maas == "Removed" and currentGeneration then
             local function has(t, status, message)
               for _, c in ipairs(obj.status.conditions) do
