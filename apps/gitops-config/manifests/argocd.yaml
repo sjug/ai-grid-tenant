@@ -150,12 +150,13 @@ spec:
               end
               return false
             end
+            -- This fork's pinned nightly emits no Progressing or Degraded condition on the DSC;
+            -- when present they must be False (checked in the loop below).
             local shape = has("KserveReady", "True") and has("AIGridReady", "True")
               and has("ProvisioningSucceeded", "True") and has("ComponentsReady", "True")
               and has("AIGatewayReady", "False", "0/0 deployments ready")
               and has("Ready", "False", "Some modules are not ready: aigateway")
               and has("ModulesReady", "False", "Some modules are not ready: aigateway")
-              and has("Progressing", "False") and has("Degraded", "False")
             if shape then
               for _, c in ipairs(obj.status.conditions) do
                 if (c.type == "Progressing" or c.type == "Degraded") and c.status ~= "False" then shape = false end
