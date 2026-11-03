@@ -22,19 +22,16 @@ automated deletion.
   `acm-submariner` ApplicationSet, so new clusters are onboarded automatically.
 - Each remote cluster runs `maas-read`, a CloudNativePG replica cluster using
   `pg_basebackup` and continuous TLS streaming replication.
-- `local-cluster` exposes `maas-read-r` (and the older alias `maas-read-ro`) as
-  ExternalNames to its local CloudNativePG read-only Service. Every cluster
-  therefore has the same read endpoint:
+- `local-cluster` exposes `maas-read-ro` and `maas-read-r` as ExternalNames to
+  its local CloudNativePG read-only Service. Every cluster therefore has the
+  same read endpoint; `maas-read-r` is the name a remote site's one-instance
+  replica cluster can actually serve (its only instance carries `role=primary`,
+  so CloudNativePG's `-ro` Service there has no endpoint while `-r` does).
+  `maas-db-config` names the second:
 
 ```text
 maas-read-r.maas-db.svc.cluster.local:5432
 ```
-
-  On a remote site that name is CloudNativePG's own `-r` Service of the replica
-  cluster. The replica has one instance, which CloudNativePG labels
-  `role=primary` (the designated primary of a replica cluster, still in
-  recovery); the `-ro` Service selects `role=replica` and so never has an
-  endpoint there, while `-r` selects every ready instance.
 
 - `maas-api` reads `maas-db-config` from its own namespace. The Secret has
   `DB_CONNECTION_URL` for the writable service and
@@ -44,6 +41,34 @@ maas-read-r.maas-db.svc.cluster.local:5432
   clusters without storing plaintext secrets in Git.
 - New managed clusters are selected automatically through the `global` cluster
   set. Argo CD creates a replica Application for each ACM-registered cluster.
+
+## Switching the read endpoint
+
+`maas-db-config` names `maas-read-r`. A deployment that still names
+`maas-read-ro` switches in two steps, because a maas-api that restarts after
+the Secret changes resolves the new name at once:
+
+1. Deploy the alias (`local-cluster/31-read-service-r.yaml`) and let it
+   reconcile on every site. Then run the gate against the hub and every ingress
+   or combined site; it checks that `maas-read-r` exists, has ready endpoints
+   (the hub's through its ExternalName target) and answers an authenticated
+   read from inside a database pod:
+
+   ```sh
+   apps/maas-db/check-read-alias.sh <hub kubeconfig> <site kubeconfig>...
+   ```
+
+2. Only when every site reports `ready`, deploy the policies that name
+   `maas-read-r` (the maas-db policy and the external-services policy).
+
+On a fresh install both arrive together: the credentials policy (wave 3) may
+write the Secret before the database Application (wave 5) has created the
+Service, and reads fail until it exists, exactly as they did with the old name.
+A site whose single replica instance is down has no read endpoint under either
+name. Observed on a remote ingress site with its replica hibernated: API-key
+reads through the MaaS entry kept answering and recovered without
+intervention once the replica returned; which backend served them while the
+replica was down could not be verified on that maas-api build.
 
 ## Rollout
 

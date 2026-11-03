@@ -20,7 +20,7 @@ spec:
             exclude: true
           - path: apps/argo-registration/application.yaml
             exclude: true
-          - path: apps/maas-home/application.yaml
+          - path: apps/external-services/application.yaml
             exclude: true
           - path: cluster-config/application.yaml
   template:

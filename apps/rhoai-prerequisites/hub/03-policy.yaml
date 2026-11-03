@@ -124,11 +124,7 @@ spec:
                         - namespaceSelector:
                             matchLabels:
                               kubernetes.io/metadata.name: openshift-ingress
-            # RHOAI's collector scrapes the engine and scheduler monitors KServe labels for it, and so
-            # does the cluster's own monitoring (platform and user-workload Prometheus, the namespaces
-            # labelled network.openshift.io/policy-group=monitoring): KServe's PodMonitor (engine, 8000)
-            # and ServiceMonitor (scheduler, 9090) land in user-workload monitoring, which this rule
-            # otherwise times out, and the ACM addon federates from there.
+            # RHOAI's collector scrapes the engine and scheduler monitors KServe labels for it.
             - complianceType: musthave
               objectDefinition:
                 apiVersion: networking.k8s.io/v1
@@ -155,9 +151,13 @@ spec:
                             matchLabels:
                               app.kubernetes.io/component: opentelemetry-collector
                               app.kubernetes.io/instance: redhat-ods-monitoring.data-science-collector
+                        # The cluster's user-workload Prometheus scrapes the same monitors for the hub's federation.
                         - namespaceSelector:
                             matchLabels:
-                              network.openshift.io/policy-group: monitoring
+                              kubernetes.io/metadata.name: openshift-user-workload-monitoring
+                          podSelector:
+                            matchLabels:
+                              app.kubernetes.io/name: prometheus
     # The grid gateway dials each local model on the serving gateway's publisher path
     # as grid-model-client. The serving gateway's AuthPolicy authorizes that path with a
     # SubjectAccessReview for post on serving.opendatahub.io models. The pinned model
@@ -203,13 +203,11 @@ spec:
                     name: grid-model-client
                     namespace: redhat-ai-grid
 
-    # The pinned odh-model-controller (#999) publishes each model to the grid by
-    # creating a per-model Role that grants the grid model client `post` on the
-    # model's publisher path. Kubernetes only lets a subject grant verbs it holds,
-    # and the RHOAI bundle's controller RBAC predates that feature, so without this
-    # ClusterRole every publication fails with "attempting to grant RBAC
-    # permissions not currently held" and no InferenceProvider exists (cloud69,
-    # 2026-10-31). Delivered to every site, like the model client's own grant.
+    # odh-model-controller grants the grid model client `post` on each published model's
+    # path; Kubernetes only lets it grant a verb it holds, and its bundled ClusterRole
+    # (RHOAI 3.6 nightly, ee3dcb8) lacks `post`. This ClusterRole, bound per opted-in
+    # namespace, supplies it. Remove both templates once the bundle grants the verb;
+    # pruneObjectBehavior DeleteAll then removes the objects.
     - objectDefinition:
         apiVersion: policy.open-cluster-management.io/v1
         kind: ConfigurationPolicy
@@ -218,6 +216,7 @@ spec:
         spec:
           remediationAction: enforce
           severity: medium
+          pruneObjectBehavior: DeleteAll
           object-templates:
             # mustonlyhave: this ClusterRole is tenant-owned, so Git is the whole truth of its rules.
             - complianceType: mustonlyhave
@@ -234,10 +233,40 @@ spec:
                       - models
                     verbs:
                       - post
+            # Retained from this fork's earlier form of the grant until the per-namespace RoleBindings above
+            # and below are verified on every site; then removed by a follow-up (the policy prunes it).
             - complianceType: musthave
               objectDefinition:
                 apiVersion: rbac.authorization.k8s.io/v1
                 kind: ClusterRoleBinding
+                metadata:
+                  name: odh-model-controller-grid-publisher
+                roleRef:
+                  apiGroup: rbac.authorization.k8s.io
+                  kind: ClusterRole
+                  name: odh-model-controller-grid-publisher
+                subjects:
+                  - kind: ServiceAccount
+                    name: odh-model-controller
+                    namespace: redhat-ods-applications
+    - objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1
+        kind: ConfigurationPolicy
+        metadata:
+          name: odh-model-controller-grid-publisher-namespaces
+        spec:
+          remediationAction: enforce
+          severity: medium
+          pruneObjectBehavior: DeleteAll
+          # Every AI project namespace, opted in with grid.opendatahub.io/allowed=true.
+          namespaceSelector:
+            matchLabels:
+              grid.opendatahub.io/allowed: "true"
+          object-templates:
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: rbac.authorization.k8s.io/v1
+                kind: RoleBinding
                 metadata:
                   name: odh-model-controller-grid-publisher
                 roleRef:

@@ -1,12 +1,9 @@
 apiVersion: v1
 kind: Service
 metadata:
-  # The read endpoint maas-api uses on every site. A remote site's maas-read is a
-  # one-instance replica cluster: CloudNativePG labels that instance role=primary
-  # (the designated primary, still in recovery), so its -ro Service, which selects
-  # role=replica, never has an endpoint; -r selects every ready instance and does.
-  # The hub has no maas-read cluster, so the same name points at the primary
-  # cluster's replicas here. maas-read-ro stays as an alias for older readers.
+  # maas-api's read endpoint on every site. A remote site's one-instance replica cluster
+  # labels its instance role=primary, so only the -r Service (every ready instance) has an
+  # endpoint there; on the hub the name points at the primary cluster's replicas.
   name: maas-read-r
   namespace: maas-db
   annotations:

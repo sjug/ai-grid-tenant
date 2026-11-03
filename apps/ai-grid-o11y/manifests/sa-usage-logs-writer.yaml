@@ -3,4 +3,4 @@ apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: usage-logs-writer
-  namespace: ai-grid-o11y
+  namespace: redhat-ods-monitoring

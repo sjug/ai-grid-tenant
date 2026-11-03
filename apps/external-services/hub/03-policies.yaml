@@ -1,10 +1,10 @@
-# Both read the MaaS home's own Route and Secrets where they are applied, so
-# nothing about the home is copied through the hub.
+# Both read the external-services cluster's own Route and Secrets where they are applied, so
+# nothing about this cluster is copied through the hub.
 apiVersion: policy.open-cluster-management.io/v1
 kind: Policy
 metadata:
-  name: maas-home-keycloak-public-url
-  namespace: maas-home
+  name: external-services-keycloak-public-url
+  namespace: external-services
   annotations:
     argocd.argoproj.io/sync-wave: "3"
 spec:
@@ -15,7 +15,7 @@ spec:
         apiVersion: policy.open-cluster-management.io/v1
         kind: ConfigurationPolicy
         metadata:
-          name: maas-home-keycloak-public-url
+          name: external-services-keycloak-public-url
         spec:
           remediationAction: enforce
           severity: high
@@ -36,8 +36,8 @@ spec:
 apiVersion: policy.open-cluster-management.io/v1
 kind: Policy
 metadata:
-  name: maas-home-api-credentials
-  namespace: maas-home
+  name: external-services-api-credentials
+  namespace: external-services
   annotations:
     argocd.argoproj.io/sync-wave: "3"
     policy.open-cluster-management.io/standards: NIST-CSF
@@ -51,7 +51,7 @@ spec:
         apiVersion: policy.open-cluster-management.io/v1
         kind: ConfigurationPolicy
         metadata:
-          name: maas-home-api-connection
+          name: external-services-api-connection
         spec:
           remediationAction: enforce
           severity: high
@@ -69,4 +69,4 @@ spec:
                 type: Opaque
                 stringData:
                   DB_CONNECTION_URL: '{{ printf "postgresql://%s:%s@maas-db-rw.maas-db.svc.cluster.local:5432/%s?sslmode=require" (fromSecret "maas-db" "maas-db-app" "username" | base64dec | urlquery) (fromSecret "maas-db" "maas-db-app" "password" | base64dec | urlquery) (fromSecret "maas-db" "maas-db-app" "dbname" | base64dec) }}'
-                  DB_READ_CONNECTION_URL: '{{ printf "postgresql://%s:%s@maas-read-ro.maas-db.svc.cluster.local:5432/%s?sslmode=require" (fromSecret "maas-db" "maas-db-app" "username" | base64dec | urlquery) (fromSecret "maas-db" "maas-db-app" "password" | base64dec | urlquery) (fromSecret "maas-db" "maas-db-app" "dbname" | base64dec) }}'
+                  DB_READ_CONNECTION_URL: '{{ printf "postgresql://%s:%s@maas-read-r.maas-db.svc.cluster.local:5432/%s?sslmode=require" (fromSecret "maas-db" "maas-db-app" "username" | base64dec | urlquery) (fromSecret "maas-db" "maas-db-app" "password" | base64dec | urlquery) (fromSecret "maas-db" "maas-db-app" "dbname" | base64dec) }}'

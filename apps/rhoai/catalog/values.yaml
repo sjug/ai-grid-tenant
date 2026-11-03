@@ -6,13 +6,16 @@ refresh:
   subscriptionNamespace: redhat-ods-operator
   subscriptionName: rhods-operator
   image: registry.redhat.io/openshift4/ose-cli@sha256:75bd612f3d2b4dbddcbd7a48e12b5cb4d36e4a2683e7f48209e40596e0fbfc30
-  # A cold self-managed hub needs longer than the lab's warm OSD for the catalog
-  # pod and the Subscription to exist; the Job has backoffLimit 0.
+  # A freshly installed hub needs longer than a warm one for the catalog pod and
+  # the Subscription to exist; the Job has backoffLimit 0, so the settle time
+  # must cover it.
   catalogSettleSeconds: 180
   waitTimeoutSeconds: 600
   operatorRolloutTimeoutSeconds: 300
-  # Must exceed settle + OLM wait + operator rollout (180 + 600 + 300) plus overhead.
-  activeDeadlineSeconds: 1500
+  # Job deadline. Leave unset to derive it from the three waits above plus a
+  # 300 s margin for the Job's own API calls, so the deadline can never be shorter
+  # than the waits it allows (a fixed value was, once the settle time grew).
+  activeDeadlineSeconds: null
   resources:
     requests:
       cpu: 10m

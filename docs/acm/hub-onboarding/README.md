@@ -101,19 +101,19 @@ A dedicated hub runs ACM, cert-manager and grid-enrollment, and no Grid or RHOAI
 BOOTSTRAP_PROFILE=dedicated-hub ./bootstrap.sh
 ```
 
-Its root ApplicationSet, [bootstrap/dedicated-hub/applicationset.yaml](../../../bootstrap/dedicated-hub/applicationset.yaml), syncs acm, acm-models, ai-grid-policies, ai-grid-spokes, argo-registration, cert-manager, gitops-config, grid-bootstrap, maas-home, rhoai and rhoai-prerequisites. ACM gets [core](../../../apps/acm/manifests/core) only, since observability needs object storage and Submariner needs a site. The default ApplicationSet skips [apps/cert-manager](../../../apps/cert-manager), because on a combined hub the RHOAI app installs cert-manager.
+Its root ApplicationSet, [bootstrap/dedicated-hub/applicationset.yaml](../../../bootstrap/dedicated-hub/applicationset.yaml), syncs acm, acm-models, ai-grid-policies, ai-grid-spokes, argo-registration, cert-manager, external-secrets, gitops-config, grid-bootstrap, keycloak, limitador-redis, maas-db, external-services, rhoai and rhoai-prerequisites. ACM gets [core](../../../apps/acm/manifests/core) and Submariner, since sites reach the hub's MaaS services over it. Observability stays out because it needs object storage. The default ApplicationSet skips [apps/cert-manager](../../../apps/cert-manager), because on a combined hub the RHOAI app installs cert-manager.
 
 [apps/argo-registration](../../../apps/argo-registration) registers every cluster in global with Argo CD, which on a combined hub acm-models does, so the default ApplicationSet skips it. The rhoai app installs RHOAI, and a provider gateway where apps/rhoai/provider-gateway-<cluster>.yaml exists, on each AI Grid site, as [apps/ai-grid-spokes](../../../apps/ai-grid-spokes) selects them by label and role.
 
 acm-models brings only the sample model and its MaaS objects, to AI Grid sites by role. Its GitOpsCluster would duplicate argo-registration, and the console catalog belongs to a combined hub.
 
-MaaS keeps its shared state on a site, not the hub: label one cluster ai-grid/maas-home=true, and [apps/maas-home](../../../apps/maas-home) installs the maas-db primary, Keycloak and Limitador's Redis there. The default ApplicationSet skips maas-home, because a combined hub runs them itself.
+The hub runs MaaS's shared state: the maas-db primary, Keycloak and Limitador's Redis. Sites reach them over Submariner, and ingress and combined sites get a maas-db read replica. To hold that state on one site instead, label it ai-grid/external-services=true, and [apps/external-services](../../../apps/external-services) installs them there. Do not use both. The default ApplicationSet skips external-services, because a combined hub runs them itself.
 
 The profile sets two grid-bootstrap values for a new grid on its own hub: external.certManager.ca.mode Generate, and managedClusters.createClusterSetBinding true, since no RHOAI app binds ClusterSet global into redhat-ai-grid there. Keep Generate for the life of the hub: its CA is a cert-manager Certificate.
 
 rhoai-prerequisites delivers the quay.io/rhoai mirror and pull Secret to every cluster in global, the hub included. The grid-enrollment image needs them, so set RHOAI_QUAY_PULL_SECRET before bootstrap.sh, as for any hub. Without it, grid-bootstrap's CA Job stays in ImagePullBackOff. Applying the mirror reboots each node once, so a single-node hub drops out for a few minutes. To avoid the mirror, pin the grid-enrollment image to the public ODH build in the grid-bootstrap values.
 
-Verify: the eleven Applications Synced and Healthy, the MultiClusterHub Running, and local-cluster joined and available. Do not label local-cluster with ai-grid/enabled; that label alone would make the hub a site.
+Verify: the fifteen Applications Synced and Healthy, the MultiClusterHub Running, and local-cluster joined and available. Do not label local-cluster with ai-grid/enabled; that label alone would make the hub a site.
 
 ## Grid ID
 
@@ -168,3 +168,10 @@ flowchart TD
 * Argo bootstrap: https://github.com/ai-grid-cloud/ai-grid-cluster-gitops/blob/main/bootstrap.sh
 * ACM manifests: https://github.com/ai-grid-cloud/ai-grid-cluster-gitops/tree/main/apps/acm/manifests
 * Hub values: https://github.com/ai-grid-cloud/ai-grid-cluster-gitops/blob/main/apps/grid-bootstrap/values.yaml
+
+## Upgrading
+
+- Before upgrading a hub that runs on managed OpenShift (OSD, ROSA) to a revision
+  with the `ai-grid/platform-namespaces` label, label `local-cluster` with
+  `ai-grid/platform-namespaces=true`: the rhoai chart otherwise starts creating
+  `openshift-operators-redhat`, which the platform already owns there.

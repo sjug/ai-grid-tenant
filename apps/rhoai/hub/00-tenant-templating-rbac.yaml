@@ -46,7 +46,7 @@ roleRef:
   kind: Role
   name: rhoai-tenant-templating
 ---
-# Finds the MaaS home, which holds Keycloak when it is not the hub.
+# Finds the external-services cluster, which holds Keycloak when it is not the hub.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:

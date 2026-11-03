@@ -4,16 +4,16 @@ metadata:
   # Only a dedicated hub syncs this. On a hub that is also a site, MaaS's shared
   # state runs on the hub through the keycloak, limitador-redis, external-secrets
   # and maas-db apps, so the default root ApplicationSet excludes it.
-  name: maas-home
+  name: external-services
   namespace: openshift-gitops
 spec:
   project: default
   source:
     repoURL: https://github.com/sjug/ai-grid-tenant.git
     targetRevision: main
-    path: apps/maas-home/hub
+    path: apps/external-services/hub
   # maas-db, created untracked, holds the rhoai app's tenant RBAC Role; this
-  # app's own objects name the maas-home namespace.
+  # app's own objects name the external-services namespace.
   destination:
     server: https://kubernetes.default.svc
     namespace: maas-db

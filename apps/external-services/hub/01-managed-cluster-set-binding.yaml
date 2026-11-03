@@ -2,7 +2,7 @@ apiVersion: cluster.open-cluster-management.io/v1beta2
 kind: ManagedClusterSetBinding
 metadata:
   name: global
-  namespace: maas-home
+  namespace: external-services
   annotations:
     argocd.argoproj.io/sync-wave: "1"
 spec:

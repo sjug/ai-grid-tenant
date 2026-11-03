@@ -1,7 +1,7 @@
 apiVersion: argoproj.io/v1alpha1
 kind: ApplicationSet
 metadata:
-  name: maas-home
+  name: external-services
   namespace: openshift-gitops
   annotations:
     # Before the Policies: they read the Route and Secrets this installs, and
@@ -18,13 +18,13 @@ spec:
     - matrix:
         generators:
           # The cluster Secret's labels, not a Placement's live decisions: ACM
-          # never removes a label from the Secret, so the home stays selected
+          # never removes a label from the Secret, so this cluster stays selected
           # until someone deliberately moves it.
           - clusters:
               selector:
                 matchLabels:
                   apps.open-cluster-management.io/acm-cluster: "true"
-                  ai-grid/maas-home: "true"
+                  ai-grid/external-services: "true"
           # ServiceExports need Submariner, which only replicas on other sites use.
           - list:
               elements:
@@ -39,7 +39,7 @@ spec:
                   exclude: 20-service-export.yaml
                   prune: "false"
                 - component: keycloak
-                  path: apps/maas-home/keycloak
+                  path: apps/external-services/keycloak
                   namespace: maas-db
                   exclude: ""
                   prune: "true"
@@ -50,7 +50,7 @@ spec:
                   prune: "true"
   template:
     metadata:
-      name: 'maas-home-{{ .component }}-{{ .name | trunc 30 }}'
+      name: 'external-services-{{ .component }}-{{ .name | trunc 22 }}'
       namespace: openshift-gitops
     spec:
       project: default

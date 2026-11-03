@@ -2,8 +2,8 @@ apiVersion: cluster.open-cluster-management.io/v1beta1
 kind: Placement
 metadata:
   # The one site that holds MaaS's shared state.
-  name: maas-home
-  namespace: maas-home
+  name: external-services
+  namespace: external-services
   annotations:
     argocd.argoproj.io/sync-wave: "2"
 spec:
@@ -14,7 +14,7 @@ spec:
     - requiredClusterSelector:
         labelSelector:
           matchLabels:
-            ai-grid/maas-home: "true"
+            ai-grid/external-services: "true"
   tolerations:
     - key: cluster.open-cluster-management.io/unreachable
       operator: Exists

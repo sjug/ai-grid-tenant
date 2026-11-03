@@ -15,7 +15,7 @@ apiVersion: perses.dev/v1alpha1
 kind: PersesDashboard
 metadata:
   name: dashboard-4-maas-usage-logs-admin
-  namespace: ai-grid-o11y
+  namespace: redhat-ods-monitoring
   labels:
     app.kubernetes.io/managed-by: maas-controller
     app.kubernetes.io/component: perses

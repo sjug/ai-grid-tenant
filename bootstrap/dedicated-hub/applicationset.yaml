@@ -23,7 +23,11 @@ spec:
           - path: apps/cert-manager/application.yaml
           - path: apps/gitops-config/application.yaml
           - path: apps/grid-bootstrap/application.yaml
-          - path: apps/maas-home/application.yaml
+          - path: apps/external-services/application.yaml
+          - path: apps/maas-db/application.yaml
+          - path: apps/keycloak/application.yaml
+          - path: apps/limitador-redis/application.yaml
+          - path: apps/external-secrets/application.yaml
           - path: apps/argo-registration/application.yaml
           - path: apps/rhoai/application.yaml
           - path: apps/rhoai-prerequisites/application.yaml
@@ -36,14 +40,15 @@ spec:
       destination:
         server: '{{.spec.destination.server}}'
         namespace: '{{.spec.destination.namespace}}'
-  # ACM observability needs object storage and Submariner needs a site. A new
+  # ACM observability needs object storage, so it is left out. A new
   # grid generates its CA, and grid-bootstrap binds global in place of the rhoai
   # app's binding. acm-models brings only the sample model: argo-registration
   # registers clusters here, and the console catalog is the combined hub's.
+  # Limitador runs on the sites, so limitador-redis leaves out its storage config.
   templatePatch: |
     {{- $spec := .spec }}
     {{- if eq .metadata.name "acm" }}
-    {{- $_ := set $spec.source "path" "apps/acm/manifests/core" }}
+    {{- $_ := set $spec.source "path" "apps/acm/manifests/dedicated-hub" }}
     {{- end }}
     {{- if eq .metadata.name "grid-bootstrap" }}
     {{- range $spec.sources }}{{ if hasKey . "helm" }}
@@ -52,6 +57,9 @@ spec:
     {{- end }}
     {{- if eq .metadata.name "acm-models" }}
     {{- $_ := set $spec.source "directory" (dict "include" "{facebook-opt-125m-03-applicationset.yaml,maas-03-applicationset.yaml}") }}
+    {{- end }}
+    {{- if eq .metadata.name "limitador-redis" }}
+    {{- $_ := set $spec.source "directory" (dict "exclude" "{04-limitador-redis-secret.yaml,20-limitador-storage.yaml}") }}
     {{- end }}
     {{- if eq .metadata.name "rhoai" }}
     {{- $_ := set $spec.source "directory" (dict "exclude" "00-managed-cluster-set-binding-grid.yaml") }}

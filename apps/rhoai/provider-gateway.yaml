@@ -49,22 +49,4 @@ route:
     termination: passthrough
   annotations:
     haproxy.router.openshift.io/timeout: 300s
-networkPolicy:
-  # A peer arrives through the load balancer, and externalTrafficPolicy Cluster
-  # translates it to the address of the node that received it. The peer itself is
-  # authenticated by its certificate and SPIFFE id on the listener, not here.
-  from:
-    - podSelector:
-        matchLabels:
-          grid.opendatahub.io/gateway-client: "true"
-    - namespaceSelector:
-        matchLabels:
-          network.openshift.io/policy-group: ingress
-    # The three cloud69 machine networks: hub, spoke-a, spoke-b. A peer's request
-    # is seen from the node that received it, so the local network must be here.
-    - ipBlock:
-        cidr: 198.18.0.0/22
-    - ipBlock:
-        cidr: 198.18.4.0/22
-    - ipBlock:
-        cidr: 198.18.8.0/22
+# networkPolicy.from is set per site by hub/04-provider-gateway-applicationset.yaml.

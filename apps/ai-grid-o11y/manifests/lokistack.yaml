@@ -2,7 +2,7 @@ apiVersion: loki.grafana.com/v1
 kind: LokiStack
 metadata:
   name: usage-logs
-  namespace: ai-grid-o11y
+  namespace: redhat-ods-monitoring
   annotations:
     # After the wave-1 hook has written the object-storage Secret.
     argocd.argoproj.io/sync-wave: "2"
@@ -32,7 +32,6 @@ spec:
     tls:
       caName: openshift-service-ca-bundle
       caKey: service-ca.crt
-  # cloud69 carry: LVM Storage on the hub workers; upstream uses gp3-csi (AWS).
   storageClassName: lvms-vg1
   tenants:
     mode: openshift-logging

@@ -9,4 +9,4 @@ roleRef:
 subjects:
   - kind: ServiceAccount
     name: usage-logs-writer
-    namespace: ai-grid-o11y
+    namespace: redhat-ods-monitoring

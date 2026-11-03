@@ -1,18 +1,18 @@
 apiVersion: policy.open-cluster-management.io/v1
 kind: PlacementBinding
 metadata:
-  name: maas-home
-  namespace: maas-home
+  name: external-services
+  namespace: external-services
   annotations:
     argocd.argoproj.io/sync-wave: "3"
 placementRef:
   apiGroup: cluster.open-cluster-management.io
   kind: Placement
-  name: maas-home
+  name: external-services
 subjects:
   - apiGroup: policy.open-cluster-management.io
     kind: Policy
-    name: maas-home-keycloak-public-url
+    name: external-services-keycloak-public-url
   - apiGroup: policy.open-cluster-management.io
     kind: Policy
-    name: maas-home-api-credentials
+    name: external-services-api-credentials

@@ -2,7 +2,7 @@ apiVersion: perses.dev/v1alpha1
 kind: PersesDatasource
 metadata:
   name: usage-logs-all
-  namespace: ai-grid-o11y
+  namespace: redhat-ods-monitoring
 spec:
   config:
     display:
@@ -14,7 +14,7 @@ spec:
         proxy:
           kind: HTTPProxy
           spec:
-            url: 'https://usage-logs-gateway-http.ai-grid-o11y.svc.cluster.local:8080/api/logs/v1/infrastructure'
+            url: 'https://usage-logs-gateway-http.redhat-ods-monitoring.svc.cluster.local:8080/api/logs/v1/infrastructure'
             allowedEndpoints:
               - endpointPattern: "/loki/api/v1/query"
                 method: GET

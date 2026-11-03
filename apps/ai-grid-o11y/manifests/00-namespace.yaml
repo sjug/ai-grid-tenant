@@ -2,6 +2,8 @@
 apiVersion: v1
 kind: Namespace
 metadata:
-  name: ai-grid-o11y
+  name: redhat-ods-monitoring
   annotations:
+    # Shared with RHOAI's monitoring: never pruned or deleted by this Application.
+    argocd.argoproj.io/sync-options: Prune=false,Delete=false
     argocd.argoproj.io/sync-wave: "-1"

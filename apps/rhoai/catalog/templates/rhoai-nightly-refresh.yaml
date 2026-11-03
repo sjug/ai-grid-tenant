@@ -1,6 +1,8 @@
 {{- if .Values.refresh.enabled }}
 {{- $catalogImage := printf "%s/%s:%s" .Values.image.registry .Values.image.repository .Values.image.tag }}
-{{- $refreshKey := printf "%s/%s" .Chart.Version $catalogImage }}
+{{- /* Everything that shapes the Job's pod template is part of its name: a Job's template is immutable, so a
+     changed setting must produce a new Job rather than an update of the existing one. */}}
+{{- $refreshKey := printf "%s/%s/%s/%s/%s/%s/%s/%s/%v/%v/%v/%s" .Chart.Version $catalogImage .Values.refresh.image .Values.refresh.package .Values.refresh.channel .Values.refresh.catalogNamespace .Values.refresh.subscriptionNamespace .Values.refresh.subscriptionName .Values.refresh.catalogSettleSeconds .Values.refresh.waitTimeoutSeconds .Values.refresh.operatorRolloutTimeoutSeconds (.Values.refresh.resources | toJson) }}
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -36,6 +38,8 @@ rules:
       - clusterserviceversions
     verbs:
       - get
+      - list
+      - watch
       - delete
   - apiGroups:
       - apps
@@ -99,7 +103,8 @@ metadata:
     argocd.argoproj.io/sync-wave: "0"
 spec:
   backoffLimit: 0
-  activeDeadlineSeconds: {{ .Values.refresh.activeDeadlineSeconds }}
+  {{- $derivedDeadline := add .Values.refresh.catalogSettleSeconds .Values.refresh.waitTimeoutSeconds .Values.refresh.operatorRolloutTimeoutSeconds 300 }}
+  activeDeadlineSeconds: {{ .Values.refresh.activeDeadlineSeconds | default $derivedDeadline }}
   ttlSecondsAfterFinished: 3600
   template:
     metadata:

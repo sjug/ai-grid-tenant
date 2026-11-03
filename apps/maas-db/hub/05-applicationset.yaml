@@ -4,7 +4,8 @@ metadata:
   name: maas-db
   namespace: openshift-gitops
   annotations:
-    argocd.argoproj.io/sync-wave: "5"
+    # Before the wave 3 Policies, which stay NonCompliant until the primary it creates exists.
+    argocd.argoproj.io/sync-wave: "2"
 spec:
   goTemplate: true
   goTemplateOptions: ["missingkey=error"]

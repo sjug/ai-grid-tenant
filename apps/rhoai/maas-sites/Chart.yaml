@@ -1,0 +1,9 @@
+apiVersion: v2
+name: maas-sites
+description: >
+  Objects every MaaS site needs beyond the RHOAI chart: today the Authorino
+  trust patch. Rendered for the ingress and combined roles; an inference site
+  runs no MaaS and renders nothing (the rhoai ApplicationSet sets enabled
+  from the site's ai-grid/role label).
+type: application
+version: 0.1.0

@@ -30,18 +30,24 @@ wait_for_crd() {
 wait_for_crd applications.argoproj.io
 wait_for_crd applicationsets.argoproj.io
 
-# The operator creates the openshift-gitops namespace and its default Argo CD
-# instance shortly after the CRDs register. On a cold cluster the namespace can
-# still be missing here, so wait for the instance before applying anything into it.
+# The default Argo CD instance appears shortly after the operator's CRDs register; wait for it
+# (ARGOCD_READY_TIMEOUT_SECONDS, default 600; ARGOCD_POLL_SECONDS, default 5) before applying into it.
 echo "Waiting for the openshift-gitops Argo CD instance..."
 wait_for_argocd() {
-  for _ in $(seq 1 120); do
-    if [ "$(oc --request-timeout=30s -n openshift-gitops get argocd openshift-gitops -o jsonpath='{.status.phase}' 2>/dev/null)" = Available ]; then
+  timeout="${ARGOCD_READY_TIMEOUT_SECONDS:-600}"
+  poll="${ARGOCD_POLL_SECONDS:-5}"
+  deadline=$((SECONDS + timeout))
+  while [ "$SECONDS" -lt "$deadline" ]; do
+    remaining=$((deadline - SECONDS)); [ "$remaining" -gt 0 ] || break
+    request_timeout=30; [ "$request_timeout" -gt "$remaining" ] && request_timeout=$remaining
+    if phase=$(oc --request-timeout="${request_timeout}s" -n openshift-gitops get argocd openshift-gitops -o jsonpath='{.status.phase}' 2>/dev/null) \
+      && [ "$phase" = Available ] && [ "$SECONDS" -lt "$deadline" ]; then
       return 0
     fi
-    sleep 5
+    remaining=$((deadline - SECONDS)); [ "$remaining" -gt 0 ] || break
+    if [ "$poll" -lt "$remaining" ]; then sleep "$poll"; else sleep "$remaining"; fi
   done
-  echo "ERROR: timed out waiting for argocd/openshift-gitops to become Available." >&2
+  echo "ERROR: argocd/openshift-gitops not Available after ${timeout}s; set ARGOCD_READY_TIMEOUT_SECONDS to wait longer." >&2
   return 1
 }
 wait_for_argocd

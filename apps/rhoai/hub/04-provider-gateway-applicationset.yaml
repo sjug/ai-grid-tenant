@@ -50,6 +50,28 @@ spec:
             parameters:
               - name: grid.siteName
                 value: '{{ .name }}'
+            # The ingress policy group admits the router, on the host network too (OVN
+            # expands it to the nodes' management addresses). A site whose gateway sees
+            # peers as node machine addresses adds that network with the ManagedCluster
+            # label ai-grid/machine-network=<IPv4 CIDR, _ for />, prefix 1-32; any other
+            # value renders a cidr no parser accepts, so the sync fails.
+            values: |
+              networkPolicy:
+                from:
+                  - podSelector:
+                      matchLabels:
+                        grid.opendatahub.io/gateway-client: "true"
+                  - namespaceSelector:
+                      matchLabels:
+                        network.openshift.io/policy-group: ingress
+                  {{- with index .metadata.labels "ai-grid/machine-network" }}
+                  - ipBlock:
+                      {{- if regexMatch "^((25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])\\.){3}(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])_([1-9]|[12][0-9]|3[0-2])$" . }}
+                      cidr: {{ replace "_" "/" . | quote }}
+                      {{- else }}
+                      cidr: {{ printf "invalid ai-grid/machine-network label %s" . | quote }}
+                      {{- end }}
+                  {{- end }}
       # Same destination rule as the rhoai Applications: the hub through Argo's in-cluster server.
       destination:
         server: '{{ if eq (index .metadata.labels "local-cluster") "true" }}https://kubernetes.default.svc{{ else }}{{ .server }}{{ end }}'

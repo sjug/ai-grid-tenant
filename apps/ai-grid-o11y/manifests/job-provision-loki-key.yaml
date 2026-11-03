@@ -5,7 +5,7 @@ apiVersion: batch/v1
 kind: Job
 metadata:
   generateName: provision-loki-s3-secret-
-  namespace: ai-grid-o11y
+  namespace: redhat-ods-monitoring
   annotations:
     argocd.argoproj.io/hook: Sync
     argocd.argoproj.io/sync-wave: "1"
@@ -19,14 +19,12 @@ spec:
       restartPolicy: Never
       containers:
         - name: create-secret
-          # The cluster's own CLI image (OpenShift 4.22.20 release payload), pinned by digest; upstream uses
-          # registry.redhat.io/openshift4/ose-cli:latest.
-          image: quay.io/openshift-release-dev/ocp-v4.0-art-dev@sha256:b923153c0f976e347851bf821c69b79bd67560c64af60774f72ecd1e761c0424
+          image: quay.io/openshift-release-dev/ocp-v4.0-art-dev@sha256:b923153c0f976e347851bf821c69b79bd67560c64af60774f72ecd1e761c0424 # 4.22.20 release cli
           command: ["/bin/bash", "-c"]
           args:
             - |
               set -euo pipefail
-              O11Y_NS=ai-grid-o11y
+              O11Y_NS=redhat-ods-monitoring
               LOKI_NAME=usage-logs
               oc() { command oc --request-timeout=15s "$@"; }
               phase=""

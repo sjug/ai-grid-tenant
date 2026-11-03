@@ -51,6 +51,9 @@ The hub:
 The MaaS database primary always runs on the hub. A typical grid is one ingress
 site plus inference sites, or one combined site plus inference sites.
 
+Bare metal, or any site without a cloud provider: [bare metal](bare-metal/README.md)
+lists what the site brings and declares.
+
 ## 1. Hub
 
 Install Argo CD and ACM, point the fork at itself, run the bootstrap script.
