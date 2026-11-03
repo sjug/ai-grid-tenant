@@ -94,6 +94,18 @@ The [getting started](../README.md#verification) checks, plus:
 
 ## Upgrading and rolling back
 
+- Before promoting an upgrade, run `BOOTSTRAP_PROFILE='' KUBECONFIG=/path/to/hub-kubeconfig scripts/check-root-appset.sh`
+  from the candidate checkout (use `dedicated-hub` for that profile), review generated
+  Application removals before reconciliation, and check again afterwards.
+  The default root remains bootstrap-managed and needs reviewed manual re-applies;
+  an existing dedicated hub needs one reviewed re-apply to introduce the generator
+  entry for `bootstrap/dedicated-hub/application.yaml`, which its old root cannot discover.
+  Once that entry is present and `dedicated-hub-root` has synced, investigate its
+  revision and sync status for persistent drift rather than applying over it.
+  For directory renames, reconcile and verify a compatibility configuration with both
+  paths before advancing to the renamed layout, even when skipping revisions; the
+  dedicated profile must preserve the generated Application's identity without
+  duplicate files ([full procedure](../hub-onboarding/README.md#root-applicationset-upgrades)).
 - The read-endpoint switch (`maas-read-r`) deploys after the alias has
   reconciled everywhere; the gate above is the check
   ([maas-db](../../../apps/maas-db/README.md)).

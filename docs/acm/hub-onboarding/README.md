@@ -24,14 +24,74 @@ export RHOAI_STAGE_PULL_SECRET=<base64 of user:password for registry.stage.redha
 
 bootstrap.sh installs the openshift-gitops-operator Subscription, waits for the Argo CRDs, and applies a root ApplicationSet over apps/*/application.yaml. Argo then syncs every app from the fork.
 
-The root ApplicationSet is the one object Argo does not sync from Git. After a change to bootstrap/applicationset.yaml, or to bootstrap/dedicated-hub/applicationset.yaml on a dedicated hub, apply it again from the revision the hub tracks:
+### Root ApplicationSet upgrades
+
+The default profile's root ApplicationSet is bootstrap-managed: Argo does not
+sync it from Git, so configuration changes still need a reviewed manual re-apply.
+The dedicated profile is reconciled by `dedicated-hub-root` once its live root
+ApplicationSet includes `bootstrap/dedicated-hub/application.yaml` in the generator.
+If drift persists after adoption, investigate that Application's source revision
+and sync status rather than applying over it.
+
+An existing dedicated hub without that generator entry needs one reviewed
+re-apply to introduce it; the old ApplicationSet cannot discover its new manager.
+Then verify `dedicated-hub-root` has synced the reviewed revision before relying
+on automatic root reconciliation.
+
+For either profile, check the live object against the candidate checkout before
+promoting the tracked branch, then check again after reconciliation:
 
 ```bash
-oc apply -f bootstrap/applicationset.yaml                 # combined hub
-oc apply -f bootstrap/dedicated-hub/applicationset.yaml   # dedicated hub
+export KUBECONFIG=/path/to/hub-kubeconfig
+export BOOTSTRAP_PROFILE=''  # Use dedicated-hub for that profile.
+scripts/check-root-appset.sh
 ```
 
-Every Application it generates syncs from Git on its own.
+The profile must be set explicitly, including the empty value for the default
+profile; it is never inferred from the live object's name. The checker prints
+the checkout SHA, desired-file changes, and desired and live repository/revision.
+It compares the full spec, including templates, and returns **0** for equal,
+**1** for drift, or **2** when it cannot check. A failed read is never equality.
+Reads have a bounded timeout (`OC_REQUEST_TIMEOUT`, default 20 seconds).
+The only normalisation is absent `preserveResourcesOnDeletion` versus `false`;
+an absent `applicationsSync` remains different from an explicit value.
+
+The checker neither applies changes nor previews generated Application removals.
+Review those removals and their resources before a manual re-apply or a managed
+root sync. With `applicationsSync: sync` and
+`preserveResourcesOnDeletion: false`, removing a
+generated Application can delete its managed resources. For the default profile
+or initial dedicated-profile adoption only, apply the selected file after that
+review and check again:
+
+```bash
+oc --kubeconfig "$KUBECONFIG" apply -f "bootstrap/${BOOTSTRAP_PROFILE:+${BOOTSTRAP_PROFILE}/}applicationset.yaml"
+scripts/check-root-appset.sh
+```
+
+For a directory rename, first commit a compatibility configuration containing
+both the old and new paths, and have every affected hub reconcile and verify it:
+manually on default or unadopted dedicated hubs, through `dedicated-hub-root`
+on adopted dedicated hubs.
+Only then move the directory on the tracked branch; remove the obsolete path
+later. The default profile needs both exclusions during the transition. The
+dedicated profile needs both selected paths, with the file moved rather than
+copied: preserve the generated Application's name and namespace, and never
+have two files generate the same identity. A hub skipping the intermediate
+revision must still reconcile and verify that compatibility configuration before
+its tracked branch advances to the renamed layout. Applying only the final root
+file while the generator reads the old layout can select an excluded application
+or deselect a required one.
+
+For offline review, use a saved JSON object with the same comparator; this
+makes no API calls, needs no kubeconfig, and makes no freshness claim:
+
+```bash
+BOOTSTRAP_PROFILE='' LIVE_JSON=/path/to/root-appset.json scripts/check-root-appset.sh
+```
+
+Every generated Application continues to sync from Git on its own. An equal
+root spec does not establish that those Applications or their workloads are healthy.
 
 ## Installing ACM
 
