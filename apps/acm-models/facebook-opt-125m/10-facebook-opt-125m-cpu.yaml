@@ -28,18 +28,9 @@ spec:
         - name: openshift-ai-inference
           namespace: openshift-ingress
   template:
-    # The 3.6 base preset adds pvc-evictor, which exits without /kv-cache.
-    volumes:
-      - name: kv-cache
-        emptyDir: {}
+    # No pvc-evictor mount here (upstream #158): this fork's pinned preset has only the main container,
+    # and a pvc-evictor entry without an image makes the Deployment invalid.
     containers:
-      - name: pvc-evictor
-        volumeMounts:
-          - name: kv-cache
-            mountPath: /kv-cache
-          - name: kv-cache
-            mountPath: /kv-cache/kv/model-cache/models
-            subPath: models
       - name: main
         env:
           - name: VLLM_CPU_KVCACHE_SPACE

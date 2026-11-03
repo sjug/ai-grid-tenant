@@ -26,3 +26,6 @@ spec:
     syncOptions:
       - CreateNamespace=true
       - SkipDryRunOnMissingResource=true
+      # Background: under foreground deletion the loki-operator recreates a LokiStack's children
+      # while garbage collection removes them, and the prune never finishes.
+      - PrunePropagationPolicy=background
