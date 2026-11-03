@@ -1,7 +1,8 @@
 # Capacity for the ACM observability bucket: the default NooBaa backing store is one
 # 50Gi volume on this lab; four give the Thanos bucket room for the campaign's raw and
 # downsampled blocks. The ODF operator created and owns the BackingStore, so this is a
-# server-side-apply partial that owns exactly one field, like the Authorino trust patch.
+# server-side-apply partial that owns only the volume count and the agents' cpu and
+# memory, like the Authorino trust patch.
 apiVersion: noobaa.io/v1alpha1
 kind: BackingStore
 metadata:
@@ -13,3 +14,13 @@ metadata:
 spec:
   pvPool:
     numVolumes: 4
+    # The agents at the operator default (100m, 400Mi) are OOM-killed together whenever the
+    # Thanos compactor uploads a compacted block (chunk files of ~180Mi), and no compaction
+    # ever completes; the storage request stays the operator's.
+    resources:
+      requests:
+        cpu: 500m
+        memory: 1Gi
+      limits:
+        cpu: "1"
+        memory: 2Gi
