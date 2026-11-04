@@ -3,7 +3,7 @@
 # ("cert-manager is not available"). Newer RHOAI grants the same rules itself (odh-observability
 # opentelemetry-cert-manager-rbac.yaml). Remove this once the installed RHOAI does. The OTel operator caches the
 # check at startup: after this applies, restart it with runbooks/otel-operator-recover.sh.
-# Placement: spoke-a first as the canary; widen after its review.
+# Placement: every cluster in the bound global set (spoke-a was the canary).
 apiVersion: cluster.open-cluster-management.io/v1beta1
 kind: Placement
 metadata:
@@ -14,13 +14,6 @@ metadata:
 spec:
   clusterSets:
     - global
-  predicates:
-    - requiredClusterSelector:
-        labelSelector:
-          matchExpressions:
-            - key: name
-              operator: In
-              values: [spoke-a]
 ---
 apiVersion: policy.open-cluster-management.io/v1
 kind: Policy
