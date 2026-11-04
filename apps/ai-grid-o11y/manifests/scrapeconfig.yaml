@@ -30,6 +30,11 @@ spec:
         - role: EndpointSlice
           label: kubernetes.io/service-name=data-science-collector-prometheus
   relabelings:
+    # On the hub the agent can select both this source and its addon copy. Only the copied pool
+    # may scrape; this temporary label retains the pool's namespace even with jobName above.
+    - action: keep
+      sourceLabels: [__tmp_prometheus_job_name]
+      regex: scrapeConfig/open-cluster-management-agent-addon/rhai-metrics
     - action: keep
       sourceLabels: [__meta_kubernetes_service_name, __meta_kubernetes_endpointslice_port_name]
       regex: data-science-collector-prometheus;prometheus
