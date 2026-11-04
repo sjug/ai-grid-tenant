@@ -69,6 +69,10 @@ spec:
   # (job already carries this ScrapeConfig's own name); the agents' remote-write relabeling restores it to
   # job afterwards, which is why the hub's Thanos shows the source job names.
   metricRelabelings:
+    # The supplemental monitor feeds rhai-metrics. Keep the campaign's existing gateway jobs here.
+    - action: drop
+      sourceLabels: [exported_job]
+      regex: 'openshift-ingress/ai-grid-gateway-collector-stats'
     - action: drop
       sourceLabels: [__name__, exported_job]
       regex: '(istio_requests_total|istio_request_duration_milliseconds_(bucket|sum|count)|istio_request_bytes_(bucket|sum|count)|istio_response_bytes_(bucket|sum|count));openshift-ingress/openshift-ai-inference-metrics'

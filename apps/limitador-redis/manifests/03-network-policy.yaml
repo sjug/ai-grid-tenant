@@ -30,3 +30,15 @@ spec:
       ports:
         - port: 9121
           protocol: TCP
+    # Admit the RHOAI collector to the exporter, without opening the Redis data port.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: redhat-ods-monitoring
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/component: opentelemetry-collector
+              app.kubernetes.io/instance: redhat-ods-monitoring.data-science-collector
+      ports:
+        - port: 9121
+          protocol: TCP

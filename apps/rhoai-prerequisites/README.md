@@ -103,3 +103,18 @@ kubectl --context "$SPOKE_CONTEXT" -n limitador-redis get serviceimport \
 kubectl --context "$SPOKE_CONTEXT" -n kuadrant-system get limitador limitador \
   -o jsonpath='{.spec.storage.redis.configSecretRef.name}{"\n"}'
 ```
+
+## Application metrics
+
+Enabled grid sites collect grid, Authorino, database and Redis metrics through
+RHOAI's collector. Chart-owned monitors carry the scrape label; a policy adds
+only that label to named existing operator monitors without owning their specs.
+Removing the policy leaves those labels in place, so withdrawal must explicitly
+remove the labels as well. Namespace-wide opt-in is not required.
+
+A supplemental gateway monitor excludes the serving gateway's Istio request
+families already collected by RHOAI. Kuadrant's full gateway and Limitador
+monitors remain unlabelled to avoid duplicate collection. Existing gateway
+policies admit the collector; grid metrics and Redis receive explicit access.
+COO supplies RHOAI's MonitoringStack. Hub delivery uses `rhai-metrics` in
+`ai-grid-o11y`.

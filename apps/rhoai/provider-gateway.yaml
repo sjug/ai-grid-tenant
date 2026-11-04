@@ -50,3 +50,12 @@ route:
   annotations:
     haproxy.router.openshift.io/timeout: 300s
 # networkPolicy.from is set per site by hub/04-provider-gateway-applicationset.yaml.
+
+# Enrol the existing TLS metrics listener in RHOAI's collector.
+metricsListener:
+  fromNamespaces:
+    - redhat-ods-monitoring
+    - openshift-user-workload-monitoring
+  serviceMonitor:
+    labels:
+      monitoring.opendatahub.io/scrape: "true"

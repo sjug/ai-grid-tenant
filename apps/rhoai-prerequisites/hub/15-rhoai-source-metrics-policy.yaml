@@ -1,0 +1,169 @@
+# Enrol application sources in RHOAI's collector. ACM consumes only the resulting RHOAI stack.
+apiVersion: cluster.open-cluster-management.io/v1beta1
+kind: Placement
+metadata:
+  name: rhoai-source-metrics-sites
+  namespace: rhoai-prerequisites
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+spec:
+  clusterSets:
+    - global
+  predicates:
+    - requiredClusterSelector:
+        labelSelector:
+          matchLabels:
+            ai-grid/enabled: "true"
+          matchExpressions:
+            - key: ai-grid/role
+              operator: In
+              values: [ingress, inference, combined]
+  tolerations:
+    - key: cluster.open-cluster-management.io/unreachable
+      operator: Exists
+    - key: cluster.open-cluster-management.io/unavailable
+      operator: Exists
+---
+apiVersion: policy.open-cluster-management.io/v1
+kind: Policy
+metadata:
+  name: rhoai-source-metrics
+  namespace: rhoai-prerequisites
+  annotations:
+    argocd.argoproj.io/sync-wave: "4"
+spec:
+  disabled: false
+  remediationAction: enforce
+  policy-templates:
+    - objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1
+        kind: ConfigurationPolicy
+        metadata:
+          name: rhoai-source-monitor-labels
+        spec:
+          remediationAction: enforce
+          severity: medium
+          # These monitors belong to their operators. Preserve their specs and never prune them.
+          pruneObjectBehavior: None
+          object-templates-raw: |
+            {{- $objects := list }}
+            {{- range $source := list
+              (dict "kind" "ServiceMonitor" "namespace" "redhat-ai-grid" "name" "grid-operator")
+              (dict "kind" "ServiceMonitor" "namespace" "kuadrant-system" "name" "kuadrant-authorino-monitor")
+              (dict "kind" "PodMonitor" "namespace" "maas-db" "name" "maas-db")
+              (dict "kind" "PodMonitor" "namespace" "maas-db" "name" "maas-read") }}
+            {{- /* Do not manufacture incomplete monitors for sources absent on this site. Lookup also tracks recreation. */ -}}
+            {{- if (lookup "monitoring.coreos.com/v1" $source.kind $source.namespace $source.name).metadata }}
+            {{- $metadata := dict "name" $source.name "namespace" $source.namespace "labels" (dict "monitoring.opendatahub.io/scrape" "true") }}
+            {{- $object := dict "apiVersion" "monitoring.coreos.com/v1" "kind" $source.kind "metadata" $metadata }}
+            {{- $objects = append $objects (dict "complianceType" "musthave" "objectDefinition" $object) }}
+            {{- end }}
+            {{- end }}
+            {{ $objects | toJson }}
+    - objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1
+        kind: ConfigurationPolicy
+        metadata:
+          name: rhoai-source-metrics-resources
+        spec:
+          remediationAction: enforce
+          severity: medium
+          pruneObjectBehavior: DeleteAll
+          object-templates:
+            # The product's grid-operator policy admits OpenShift monitoring, but not RHOAI.
+            - complianceType: mustonlyhave
+              objectDefinition:
+                apiVersion: networking.k8s.io/v1
+                kind: NetworkPolicy
+                metadata:
+                  name: rhoai-collector-grid-operator-metrics
+                  namespace: redhat-ai-grid
+                spec:
+                  podSelector:
+                    matchLabels:
+                      app.kubernetes.io/name: grid-operator
+                      app.kubernetes.io/instance: grid-operator
+                  policyTypes: [Ingress]
+                  ingress:
+                    - from:
+                        - namespaceSelector:
+                            matchLabels:
+                              kubernetes.io/metadata.name: redhat-ods-monitoring
+                          podSelector:
+                            matchLabels:
+                              app.kubernetes.io/component: opentelemetry-collector
+                              app.kubernetes.io/instance: redhat-ods-monitoring.data-science-collector
+                      ports:
+                        - port: metrics
+                          protocol: TCP
+            # A separate monitor leaves Kuadrant's monitor and RHOAI's request metrics unchanged.
+            # Do not also enrol istio-pod-monitor or the campaign's ai-grid-gateway-envoy-stats.
+            - complianceType: mustonlyhave
+              objectDefinition:
+                apiVersion: monitoring.coreos.com/v1
+                kind: PodMonitor
+                metadata:
+                  name: ai-grid-gateway-collector-stats
+                  namespace: openshift-ingress
+                  labels:
+                    app.kubernetes.io/part-of: ai-grid
+                    monitoring.opendatahub.io/scrape: "true"
+                spec:
+                  selector:
+                    matchExpressions:
+                      - key: gateway.networking.k8s.io/gateway-name
+                        operator: In
+                        values: [openshift-ai-inference, maas-default-gateway]
+                      - key: istio-prometheus-ignore
+                        operator: DoesNotExist
+                  podMetricsEndpoints:
+                    - interval: 30s
+                      path: /stats/prometheus
+                      # No file or Secret references: openshift-ingress is outside the allocator's Secret scope.
+                      relabelings:
+                        - action: keep
+                          sourceLabels: [__meta_kubernetes_pod_container_name]
+                          regex: istio-proxy
+                        - action: keep
+                          sourceLabels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape]
+                          regex: 'true'
+                        - action: replace
+                          sourceLabels: [__meta_kubernetes_pod_annotation_prometheus_io_port, __meta_kubernetes_pod_ip]
+                          regex: '(\d+);(([A-Fa-f0-9]{1,4}::?){1,7}[A-Fa-f0-9]{1,4})'
+                          replacement: '[$2]:$1'
+                          targetLabel: __address__
+                        - action: replace
+                          sourceLabels: [__meta_kubernetes_pod_annotation_prometheus_io_port, __meta_kubernetes_pod_ip]
+                          regex: '(\d+);((([0-9]+?)(\.|$)){4})'
+                          replacement: '$2:$1'
+                          targetLabel: __address__
+                        - action: replace
+                          sourceLabels: [__meta_kubernetes_pod_label_gateway_networking_k8s_io_gateway_name]
+                          targetLabel: gateway_name
+                        - action: replace
+                          sourceLabels: [__meta_kubernetes_namespace]
+                          targetLabel: namespace
+                        - action: replace
+                          sourceLabels: [__meta_kubernetes_pod_name]
+                          targetLabel: pod
+                      metricRelabelings:
+                        # RHOAI already keeps these families for the serving gateway. Keep the MaaS copies.
+                        - action: drop
+                          sourceLabels: [__name__, gateway_name]
+                          regex: '(istio_requests_total|istio_request_duration_milliseconds_(bucket|sum|count)|istio_request_bytes_(bucket|sum|count)|istio_response_bytes_(bucket|sum|count));openshift-ai-inference'
+---
+apiVersion: policy.open-cluster-management.io/v1
+kind: PlacementBinding
+metadata:
+  name: rhoai-source-metrics
+  namespace: rhoai-prerequisites
+  annotations:
+    argocd.argoproj.io/sync-wave: "3"
+placementRef:
+  apiGroup: cluster.open-cluster-management.io
+  kind: Placement
+  name: rhoai-source-metrics-sites
+subjects:
+  - apiGroup: policy.open-cluster-management.io
+    kind: Policy
+    name: rhoai-source-metrics

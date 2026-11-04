@@ -1,9 +1,11 @@
-# User-workload monitoring scrapes the Redis exporter sidecars of the replication set.
+# RHOAI's collector scrapes the Redis exporter sidecars of the replication set.
 apiVersion: monitoring.coreos.com/v1
 kind: PodMonitor
 metadata:
   name: limitador-redis-exporter
   namespace: limitador-redis
+  labels:
+    monitoring.opendatahub.io/scrape: "true"
   annotations:
     argocd.argoproj.io/sync-wave: "4"
 spec:

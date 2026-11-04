@@ -115,6 +115,7 @@ spec:
                   namespace: kuadrant-system
                   labels:
                     app.kubernetes.io/part-of: ai-grid
+                    monitoring.opendatahub.io/scrape: "true"
                 spec:
                   selector:
                     matchLabels:

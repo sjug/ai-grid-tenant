@@ -247,6 +247,13 @@ grid-enrollment:
 # grid-gateway from a repository name ending in /grid-gateway, which the RHOAI
 # image does not.
 praxis-gateway:
+  metricsListener:
+    fromNamespaces:
+      - redhat-ods-monitoring
+      - openshift-user-workload-monitoring
+    serviceMonitor:
+      labels:
+        monitoring.opendatahub.io/scrape: "true"
   enabled: true
   image:
     flavor: grid-gateway
