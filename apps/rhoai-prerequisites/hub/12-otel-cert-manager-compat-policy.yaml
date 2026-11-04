@@ -1,0 +1,84 @@
+# RHOAI 3.6 submits its data-science-collector with target-allocator mTLS on cert-manager, but does not grant
+# the OpenTelemetry operator the cert-manager access it checks for at startup, so the collector is rejected
+# ("cert-manager is not available"). Newer RHOAI grants the same rules itself (odh-observability
+# opentelemetry-cert-manager-rbac.yaml). Remove this once the installed RHOAI does. The OTel operator caches the
+# check at startup: after this applies, restart it with runbooks/otel-operator-recover.sh.
+# Placement: spoke-a first as the canary; widen after its review.
+apiVersion: cluster.open-cluster-management.io/v1beta1
+kind: Placement
+metadata:
+  name: rhoai-otel-cert-manager-compat
+  namespace: rhoai-prerequisites
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+spec:
+  clusterSets:
+    - global
+  predicates:
+    - requiredClusterSelector:
+        labelSelector:
+          matchExpressions:
+            - key: name
+              operator: In
+              values: [spoke-a]
+---
+apiVersion: policy.open-cluster-management.io/v1
+kind: Policy
+metadata:
+  name: rhoai-otel-cert-manager-compat
+  namespace: rhoai-prerequisites
+  annotations:
+    argocd.argoproj.io/sync-wave: "4"
+spec:
+  disabled: false
+  remediationAction: enforce
+  policy-templates:
+    - objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1
+        kind: ConfigurationPolicy
+        metadata:
+          name: rhoai-otel-cert-manager-compat
+        spec:
+          remediationAction: enforce
+          severity: medium
+          object-templates:
+            - complianceType: mustonlyhave
+              objectDefinition:
+                apiVersion: rbac.authorization.k8s.io/v1
+                kind: ClusterRole
+                metadata:
+                  name: ai-grid-otel-cert-manager-compat
+                rules:
+                  - apiGroups: [cert-manager.io]
+                    resources: [issuers, certificaterequests, certificates]
+                    verbs: [create, get, list, watch, update, patch, delete]
+            - complianceType: mustonlyhave
+              objectDefinition:
+                apiVersion: rbac.authorization.k8s.io/v1
+                kind: ClusterRoleBinding
+                metadata:
+                  name: ai-grid-otel-cert-manager-compat
+                roleRef:
+                  apiGroup: rbac.authorization.k8s.io
+                  kind: ClusterRole
+                  name: ai-grid-otel-cert-manager-compat
+                subjects:
+                  - kind: ServiceAccount
+                    name: opentelemetry-operator-controller-manager
+                    namespace: openshift-opentelemetry-operator
+---
+apiVersion: policy.open-cluster-management.io/v1
+kind: PlacementBinding
+metadata:
+  name: rhoai-otel-cert-manager-compat
+  namespace: rhoai-prerequisites
+  annotations:
+    argocd.argoproj.io/sync-wave: "3"
+placementRef:
+  apiGroup: cluster.open-cluster-management.io
+  kind: Placement
+  name: rhoai-otel-cert-manager-compat
+subjects:
+  - apiGroup: policy.open-cluster-management.io
+    kind: Policy
+    name: rhoai-otel-cert-manager-compat
