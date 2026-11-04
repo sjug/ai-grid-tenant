@@ -1,12 +1,12 @@
-# maas-api's own metrics (API-key minting and validation, request latency and rejections, the SAR cache) on
-# the ingress sites. RHOAI ships ServiceMonitor maas-api-metrics for it, but that object reads the scraper's
-# token from a file (bearerTokenFile), which user-workload monitoring's Prometheus Operator rejects, so only
-# RHOAI's own Prometheus scrapes it and nothing reaches the hub. This ServiceMonitor authenticates with the
-# token of a service account of its own (a service-account-token Secret the cluster populates; Git holds no
-# secret), which the ClusterRole below lets read /metrics (maas-api answers 401 without a token and checks
-# the nonResourceURL with a SubjectAccessReview). RHOAI's NetworkPolicy opens 9090 to redhat-ods-monitoring
-# alone; the one below admits the monitoring namespaces (openshift-monitoring and user-workload monitoring
-# carry the policy-group label).
+# Compatibility for RHOAIENG-102689: the product's three bearerTokenFile monitors are rejected by the
+# RHOAI collector's denyFSAccessThroughSMs guard. Keep that guard and target-allocator mTLS enabled.
+# MaaS API/controller monitors go to ingress/combined sites; AI Gateway and the shared controller
+# credentials below go to every RHOAI grid site, since AI Gateway also runs without MaaS.
+# Preserve the existing API object names for upgrades. Controller monitors/credentials live in
+# redhat-ods-monitoring because the allocator must not gain Secret access to redhat-ods-applications.
+# Product NetworkPolicies already admit collector traffic on API 9090 and controller 8443.
+# Retire these compatibility monitors in a reviewed handoff when the native jobs work, avoiding
+# duplicate scrapes; then remove their credentials/grants. Policy deletion prunes these owned objects.
 apiVersion: cluster.open-cluster-management.io/v1beta1
 kind: Placement
 metadata:
@@ -26,6 +26,11 @@ spec:
             - key: ai-grid/role
               operator: In
               values: [ingress, combined]
+  tolerations:
+    - key: cluster.open-cluster-management.io/unreachable
+      operator: Exists
+    - key: cluster.open-cluster-management.io/unavailable
+      operator: Exists
 ---
 apiVersion: policy.open-cluster-management.io/v1
 kind: Policy
@@ -46,6 +51,8 @@ spec:
         spec:
           remediationAction: enforce
           severity: medium
+          # Removed from a site that leaves the ingress or combined role.
+          pruneObjectBehavior: DeleteAll
           object-templates:
             - complianceType: musthave
               objectDefinition:
@@ -56,8 +63,9 @@ spec:
                   namespace: redhat-ai-gateway-infra
                   labels:
                     app.kubernetes.io/part-of: ai-grid
-            # The token controller fills data.token and data.ca.crt for a Secret of this type; the policy
-            # compares only the fields written here.
+                    ai-grid/compatibility: rhoaieng-102689
+            # The token controller fills this Secret; never enforce its data. These manually provisioned
+            # tokens do not rotate automatically: rotate/revoke the owned token Secrets under review.
             - complianceType: musthave
               objectDefinition:
                 apiVersion: v1
@@ -68,6 +76,7 @@ spec:
                   namespace: redhat-ai-gateway-infra
                   labels:
                     app.kubernetes.io/part-of: ai-grid
+                    ai-grid/compatibility: rhoaieng-102689
                   annotations:
                     kubernetes.io/service-account.name: ai-grid-maas-api-metrics
             - complianceType: musthave
@@ -78,6 +87,7 @@ spec:
                   name: ai-grid-metrics-reader
                   labels:
                     app.kubernetes.io/part-of: ai-grid
+                    ai-grid/compatibility: rhoaieng-102689
                 rules:
                   - nonResourceURLs: ["/metrics"]
                     verbs: ["get"]
@@ -89,6 +99,7 @@ spec:
                   name: ai-grid-maas-api-metrics
                   labels:
                     app.kubernetes.io/part-of: ai-grid
+                    ai-grid/compatibility: rhoaieng-102689
                 roleRef:
                   apiGroup: rbac.authorization.k8s.io
                   kind: ClusterRole
@@ -97,6 +108,8 @@ spec:
                   - kind: ServiceAccount
                     name: ai-grid-maas-api-metrics
                     namespace: redhat-ai-gateway-infra
+            # Fork-only: retain the existing UWM path until RHOAI collection is verified and
+            # its retirement is reviewed separately. This allowance is not part of the upstream fix.
             - complianceType: musthave
               objectDefinition:
                 apiVersion: networking.k8s.io/v1
@@ -123,7 +136,7 @@ spec:
                           port: 9090
             # Same Service, port, path, CA and server name as RHOAI's maas-api-metrics; the token comes from
             # the Secret above instead of a file.
-            - complianceType: musthave
+            - complianceType: mustonlyhave
               objectDefinition:
                 apiVersion: monitoring.coreos.com/v1
                 kind: ServiceMonitor
@@ -132,6 +145,8 @@ spec:
                   namespace: redhat-ai-gateway-infra
                   labels:
                     app.kubernetes.io/part-of: ai-grid
+                    ai-grid/compatibility: rhoaieng-102689
+                    monitoring.opendatahub.io/scrape: "true"
                 spec:
                   selector:
                     matchLabels:
@@ -153,6 +168,42 @@ spec:
                             name: openshift-service-ca.crt
                             key: service-ca.crt
                         serverName: maas-api-metrics.redhat-ai-gateway-infra.svc
+            # Credentials and CA are resolved in this monitor's namespace, not the Service's namespace.
+            # The shared controller identity and CA are provisioned by rhoai-controller-metrics-compat below.
+            - complianceType: mustonlyhave
+              objectDefinition:
+                apiVersion: monitoring.coreos.com/v1
+                kind: ServiceMonitor
+                metadata:
+                  name: ai-grid-maas-controller-metrics-compat
+                  namespace: redhat-ods-monitoring
+                  labels:
+                    app.kubernetes.io/part-of: ai-grid
+                    ai-grid/compatibility: rhoaieng-102689
+                    monitoring.opendatahub.io/scrape: "true"
+                spec:
+                  namespaceSelector:
+                    matchNames: [redhat-ods-applications]
+                  selector:
+                    matchLabels:
+                      app: maas-controller
+                      control-plane: maas-controller
+                  endpoints:
+                    - port: metrics
+                      path: /metrics
+                      scheme: https
+                      interval: 30s
+                      authorization:
+                        type: Bearer
+                        credentials:
+                          name: ai-grid-controller-metrics-compat-token
+                          key: token
+                      tlsConfig:
+                        ca:
+                          configMap:
+                            name: ai-grid-controller-metrics-compat-ca
+                            key: service-ca.crt
+                        serverName: maas-controller-metrics.redhat-ods-applications.svc
 ---
 apiVersion: policy.open-cluster-management.io/v1
 kind: PlacementBinding
@@ -169,3 +220,167 @@ subjects:
   - apiGroup: policy.open-cluster-management.io
     kind: Policy
     name: rhoai-maas-api-metrics
+---
+apiVersion: cluster.open-cluster-management.io/v1beta1
+kind: Placement
+metadata:
+  name: rhoai-controller-metrics-sites
+  namespace: rhoai-prerequisites
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+spec:
+  clusterSets:
+    - global
+  predicates:
+    - requiredClusterSelector:
+        labelSelector:
+          matchLabels:
+            ai-grid/enabled: "true"
+          matchExpressions:
+            - key: ai-grid/role
+              operator: In
+              values: [ingress, inference, combined]
+  tolerations:
+    - key: cluster.open-cluster-management.io/unreachable
+      operator: Exists
+    - key: cluster.open-cluster-management.io/unavailable
+      operator: Exists
+---
+apiVersion: policy.open-cluster-management.io/v1
+kind: Policy
+metadata:
+  name: rhoai-controller-metrics-compat
+  namespace: rhoai-prerequisites
+  annotations:
+    argocd.argoproj.io/sync-wave: "4"
+spec:
+  disabled: false
+  remediationAction: enforce
+  policy-templates:
+    - objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1
+        kind: ConfigurationPolicy
+        metadata:
+          name: rhoai-controller-metrics-compat
+        spec:
+          remediationAction: enforce
+          severity: medium
+          pruneObjectBehavior: DeleteAll
+          object-templates:
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: v1
+                kind: ServiceAccount
+                metadata:
+                  name: ai-grid-controller-metrics-compat
+                  namespace: redhat-ods-monitoring
+                  labels:
+                    app.kubernetes.io/part-of: ai-grid
+                    ai-grid/compatibility: rhoaieng-102689
+            # Metadata only: the token controller supplies data and the allocator watches for rotation.
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: v1
+                kind: Secret
+                type: kubernetes.io/service-account-token
+                metadata:
+                  name: ai-grid-controller-metrics-compat-token
+                  namespace: redhat-ods-monitoring
+                  labels:
+                    app.kubernetes.io/part-of: ai-grid
+                    ai-grid/compatibility: rhoaieng-102689
+                  annotations:
+                    kubernetes.io/service-account.name: ai-grid-controller-metrics-compat
+            # A dedicated injected bundle avoids depending on another operand's CA ConfigMap lifecycle.
+            # Its data is maintained by the service CA operator, not this policy or the token Secret.
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: v1
+                kind: ConfigMap
+                metadata:
+                  name: ai-grid-controller-metrics-compat-ca
+                  namespace: redhat-ods-monitoring
+                  labels:
+                    app.kubernetes.io/part-of: ai-grid
+                    ai-grid/compatibility: rhoaieng-102689
+                  annotations:
+                    service.beta.openshift.io/inject-cabundle: "true"
+            - complianceType: mustonlyhave
+              objectDefinition:
+                apiVersion: rbac.authorization.k8s.io/v1
+                kind: ClusterRole
+                metadata:
+                  name: ai-grid-controller-metrics-compat
+                  labels:
+                    app.kubernetes.io/part-of: ai-grid
+                    ai-grid/compatibility: rhoaieng-102689
+                rules:
+                  - nonResourceURLs: ["/metrics"]
+                    verbs: ["get"]
+            - complianceType: mustonlyhave
+              objectDefinition:
+                apiVersion: rbac.authorization.k8s.io/v1
+                kind: ClusterRoleBinding
+                metadata:
+                  name: ai-grid-controller-metrics-compat
+                  labels:
+                    app.kubernetes.io/part-of: ai-grid
+                    ai-grid/compatibility: rhoaieng-102689
+                roleRef:
+                  apiGroup: rbac.authorization.k8s.io
+                  kind: ClusterRole
+                  name: ai-grid-controller-metrics-compat
+                subjects:
+                  - kind: ServiceAccount
+                    name: ai-grid-controller-metrics-compat
+                    namespace: redhat-ods-monitoring
+            - complianceType: mustonlyhave
+              objectDefinition:
+                apiVersion: monitoring.coreos.com/v1
+                kind: ServiceMonitor
+                metadata:
+                  name: ai-grid-gateway-controller-metrics-compat
+                  namespace: redhat-ods-monitoring
+                  labels:
+                    app.kubernetes.io/part-of: ai-grid
+                    ai-grid/compatibility: rhoaieng-102689
+                    monitoring.opendatahub.io/scrape: "true"
+                spec:
+                  namespaceSelector:
+                    matchNames: [redhat-ods-applications]
+                  selector:
+                    matchLabels:
+                      app: ai-gateway-controller
+                      control-plane: ai-gateway-controller
+                  endpoints:
+                    - port: metrics
+                      path: /metrics
+                      scheme: https
+                      interval: 30s
+                      authorization:
+                        type: Bearer
+                        credentials:
+                          name: ai-grid-controller-metrics-compat-token
+                          key: token
+                      tlsConfig:
+                        ca:
+                          configMap:
+                            name: ai-grid-controller-metrics-compat-ca
+                            key: service-ca.crt
+                        serverName: ai-gateway-controller-metrics.redhat-ods-applications.svc
+---
+apiVersion: policy.open-cluster-management.io/v1
+kind: PlacementBinding
+metadata:
+  name: rhoai-controller-metrics-compat
+  namespace: rhoai-prerequisites
+  annotations:
+    argocd.argoproj.io/sync-wave: "3"
+placementRef:
+  apiGroup: cluster.open-cluster-management.io
+  kind: Placement
+  name: rhoai-controller-metrics-sites
+subjects:
+  - apiGroup: policy.open-cluster-management.io
+    kind: Policy
+    name: rhoai-controller-metrics-compat
