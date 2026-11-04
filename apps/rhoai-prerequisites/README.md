@@ -13,6 +13,14 @@ in the reserved `global` ACM cluster set:
   `registry.redhat.io/rhaii*` mirrors that model images pull through.
 - the remote-only Limitador Redis configuration that shares MaaS rate-limit
   counters through the Submariner service import.
+- the hub-only `rhai-metrics` addon registration and, on enabled grid sites,
+  the NetworkPolicy admitting the local ACM agents to each RHOAI
+  collector's HTTPS exporter on port 8889. The policy retries until RHOAI creates
+  its monitoring namespace. It replaces the hub-only policy in `ai-grid-o11y`;
+  allow for a brief prune/reconcile handoff during the first sync. Do not also
+  deploy an ApplicationSet managing the same NetworkPolicy. Removing the
+  registration policy does not remove the addon's tuple: withdrawal requires a
+  separate migration that preserves the other addon configs.
 - the catalog ServiceAccount's `imagePullSecrets` wiring is managed by
   `apps/rhoai/catalog`; OLM does not update an already-created catalog
   ServiceAccount when `CatalogSource.spec.secrets` changes.

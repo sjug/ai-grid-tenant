@@ -5,13 +5,14 @@ metadata:
   namespace: open-cluster-management-observability
   labels:
     app.kubernetes.io/component: user-workload-metrics-collector
+    app.kubernetes.io/part-of: multicluster-observability-addon
 spec:
   jobName: rhai-metrics
   metricsPath: /metrics
-  params:
-    match[]:
-      - '{__name__=~".*"}' # PromQL matchers
-  # RHOAI serves its exporters over TLS only, with an OpenShift service CA cert.
+  scrapeInterval: 30s
+  # Name the class explicitly and override its CA/SNI. Other class defaults (authorization or client
+  # certificates) can still apply. The CA reference resolves in each local agent namespace.
+  scrapeClass: ocp-monitoring
   scheme: HTTPS
   tlsConfig:
     ca:
@@ -19,7 +20,36 @@ spec:
         name: openshift-service-ca.crt
         key: service-ca.crt
     serverName: data-science-collector-prometheus.redhat-ods-monitoring.svc
-  staticConfigs:
-    - targets:
-        # RHOAI's own exporter for the scrape and OTLP pipelines.
-        - data-science-collector-prometheus.redhat-ods-monitoring.svc:8889
+    insecureSkipVerify: false
+  # Each collector holds its own allocated targets. The Service's ClusterIP is not an aggregate.
+  kubernetesSDConfigs:
+    - role: EndpointSlice
+      namespaces:
+        names: [redhat-ods-monitoring]
+      selectors:
+        - role: EndpointSlice
+          label: kubernetes.io/service-name=data-science-collector-prometheus
+  relabelings:
+    - action: keep
+      sourceLabels: [__meta_kubernetes_service_name, __meta_kubernetes_endpointslice_port_name]
+      regex: data-science-collector-prometheus;prometheus
+    - action: keep
+      sourceLabels: [__meta_kubernetes_endpointslice_endpoint_conditions_ready]
+      regex: 'true'
+    - action: drop
+      sourceLabels: [__meta_kubernetes_endpointslice_endpoint_conditions_terminating]
+      regex: 'true'
+    - action: keep
+      sourceLabels: [__meta_kubernetes_endpointslice_address_target_kind]
+      regex: Pod
+    - sourceLabels: [__meta_kubernetes_endpointslice_address_target_name]
+      targetLabel: ai_grid_collector_pod
+    - targetLabel: ai_grid_collection_path
+      replacement: rhai-collector
+  # Leave honorLabels false: preserve source job/instance as exported_* and retain raw workload
+  # k8s_namespace_name/k8s_pod_name. Do not replace them with the collector's namespace/pod.
+  # ACM can restore exported_* during remote write. Protect this path/shard identity and let ACM
+  # supply cluster identity; never let a workload's cluster label override that external label.
+  metricRelabelings:
+    - action: labeldrop
+      regex: '(exported_)+(ai_grid_collection_path|ai_grid_collector_pod)|(exported_)*(cluster|clusterID)'

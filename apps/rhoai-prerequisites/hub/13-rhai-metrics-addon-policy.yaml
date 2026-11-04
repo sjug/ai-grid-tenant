@@ -1,0 +1,70 @@
+# Register the existing RHOAI exporter job without taking ownership of the addon's other configs.
+# Removing this musthave policy does not withdraw the tuple; deregistration is a separate migration.
+apiVersion: cluster.open-cluster-management.io/v1beta1
+kind: Placement
+metadata:
+  name: rhoai-metrics-hub
+  namespace: rhoai-prerequisites
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+spec:
+  clusterSets:
+    - global
+  predicates:
+    - requiredClusterSelector:
+        labelSelector:
+          matchLabels:
+            local-cluster: "true"
+---
+apiVersion: policy.open-cluster-management.io/v1
+kind: Policy
+metadata:
+  name: rhoai-metrics-addon
+  namespace: rhoai-prerequisites
+  annotations:
+    argocd.argoproj.io/sync-wave: "6"
+spec:
+  disabled: false
+  remediationAction: enforce
+  policy-templates:
+    - objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1
+        kind: ConfigurationPolicy
+        metadata:
+          name: rhoai-metrics-addon
+        spec:
+          remediationAction: enforce
+          severity: medium
+          object-templates:
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: addon.open-cluster-management.io/v1alpha1
+                kind: ClusterManagementAddOn
+                metadata:
+                  name: multicluster-observability-addon
+                spec:
+                  installStrategy:
+                    placements:
+                      - name: global
+                        namespace: open-cluster-management-global-set
+                        configs:
+                          - group: monitoring.rhobs
+                            resource: scrapeconfigs
+                            namespace: open-cluster-management-observability
+                            name: rhai-metrics
+---
+apiVersion: policy.open-cluster-management.io/v1
+kind: PlacementBinding
+metadata:
+  name: rhoai-metrics-addon
+  namespace: rhoai-prerequisites
+  annotations:
+    argocd.argoproj.io/sync-wave: "6"
+placementRef:
+  apiGroup: cluster.open-cluster-management.io
+  kind: Placement
+  name: rhoai-metrics-hub
+subjects:
+  - apiGroup: policy.open-cluster-management.io
+    kind: Policy
+    name: rhoai-metrics-addon

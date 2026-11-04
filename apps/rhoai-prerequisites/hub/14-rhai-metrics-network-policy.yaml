@@ -1,0 +1,87 @@
+# Match RHOAI's grid membership, including an enabled hub. The ConfigurationPolicy retries until
+# RHOAI creates redhat-ods-monitoring; it must not create that operator-owned namespace itself.
+apiVersion: cluster.open-cluster-management.io/v1beta1
+kind: Placement
+metadata:
+  name: rhoai-metrics-sites
+  namespace: rhoai-prerequisites
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+spec:
+  clusterSets:
+    - global
+  predicates:
+    - requiredClusterSelector:
+        labelSelector:
+          matchLabels:
+            ai-grid/enabled: "true"
+          matchExpressions:
+            - key: ai-grid/role
+              operator: In
+              values: [ingress, inference, combined]
+  tolerations:
+    - key: cluster.open-cluster-management.io/unreachable
+      operator: Exists
+    - key: cluster.open-cluster-management.io/unavailable
+      operator: Exists
+---
+apiVersion: policy.open-cluster-management.io/v1
+kind: Policy
+metadata:
+  name: rhoai-metrics-network
+  namespace: rhoai-prerequisites
+  annotations:
+    argocd.argoproj.io/sync-wave: "4"
+spec:
+  disabled: false
+  remediationAction: enforce
+  policy-templates:
+    - objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1
+        kind: ConfigurationPolicy
+        metadata:
+          name: rhoai-metrics-network
+        spec:
+          remediationAction: enforce
+          severity: medium
+          object-templates:
+            - complianceType: mustonlyhave
+              objectDefinition:
+                apiVersion: networking.k8s.io/v1
+                kind: NetworkPolicy
+                metadata:
+                  name: allow-acm-rhai-metrics
+                  namespace: redhat-ods-monitoring
+                  labels:
+                    app.kubernetes.io/component: user-workload-metrics-collector
+                spec:
+                  podSelector:
+                    matchLabels:
+                      app.kubernetes.io/instance: redhat-ods-monitoring.data-science-collector
+                      app.kubernetes.io/component: opentelemetry-collector
+                  policyTypes:
+                    - Ingress
+                  ingress:
+                    - from:
+                        - namespaceSelector:
+                            matchLabels:
+                              kubernetes.io/metadata.name: open-cluster-management-agent-addon
+                      ports:
+                        - port: 8889
+                          protocol: TCP
+---
+apiVersion: policy.open-cluster-management.io/v1
+kind: PlacementBinding
+metadata:
+  name: rhoai-metrics-network
+  namespace: rhoai-prerequisites
+  annotations:
+    argocd.argoproj.io/sync-wave: "3"
+placementRef:
+  apiGroup: cluster.open-cluster-management.io
+  kind: Placement
+  name: rhoai-metrics-sites
+subjects:
+  - apiGroup: policy.open-cluster-management.io
+    kind: Policy
+    name: rhoai-metrics-network
