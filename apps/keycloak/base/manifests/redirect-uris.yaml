@@ -86,12 +86,13 @@ spec:
 
                   printf 'http://localhost:8000/callback\n' >> /shared/redirect-uris
                   sort -u /shared/redirect-uris -o /shared/redirect-uris
+              # oc builds its discovery cache on every run; on a hub with a few hundred CRDs that peaks above 100Mi.
               resources:
                 requests:
                   cpu: 10m
-                  memory: 32Mi
-                limits:
                   memory: 64Mi
+                limits:
+                  memory: 256Mi
               volumeMounts:
                 - name: redirect-uris
                   mountPath: /shared
