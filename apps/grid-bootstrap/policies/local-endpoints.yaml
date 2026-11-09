@@ -1,3 +1,23 @@
+# Members that run models. An ingress site publishes no endpoints: the operator writes
+# its GridSite without them, and peers admit it as a caller without dialing or polling it.
+apiVersion: cluster.open-cluster-management.io/v1beta1
+kind: Placement
+metadata:
+  name: grid-local-endpoints
+  namespace: redhat-ai-grid
+spec:
+  clusterSets:
+    - global
+  predicates:
+    - requiredClusterSelector:
+        labelSelector:
+          matchLabels:
+            ai-grid/enabled: "true"
+          matchExpressions:
+            - key: ai-grid/role
+              operator: In
+              values: [inference, combined]
+---
 apiVersion: policy.open-cluster-management.io/v1
 kind: PlacementBinding
 metadata:
@@ -6,7 +26,7 @@ metadata:
 placementRef:
   apiGroup: cluster.open-cluster-management.io
   kind: Placement
-  name: grid-bootstrap-membership
+  name: grid-local-endpoints
 subjects:
   - apiGroup: policy.open-cluster-management.io
     kind: Policy

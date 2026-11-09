@@ -1,0 +1,53 @@
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: keycloak-grid-tenant-1-idp-signing
+  namespace: maas-db
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+spec:
+  secretName: keycloak-grid-tenant-1-idp-signing
+  commonName: keycloak-grid-tenant-1-idp-signing
+  duration: 87600h
+  renewBefore: 720h
+  privateKey:
+    algorithm: RSA
+    size: 2048
+    rotationPolicy: Never
+  keystores:
+    jks:
+      create: true
+      alias: grid-tenant-1-idp-signing
+      passwordSecretRef:
+        name: keycloak-signing-keystore-password
+        key: password
+  issuerRef:
+    name: keycloak-signing-selfsigned
+    kind: Issuer
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: keycloak-grid-tenant-2-idp-signing
+  namespace: maas-db
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+spec:
+  secretName: keycloak-grid-tenant-2-idp-signing
+  commonName: keycloak-grid-tenant-2-idp-signing
+  duration: 87600h
+  renewBefore: 720h
+  privateKey:
+    algorithm: RSA
+    size: 2048
+    rotationPolicy: Never
+  keystores:
+    jks:
+      create: true
+      alias: grid-tenant-2-idp-signing
+      passwordSecretRef:
+        name: keycloak-signing-keystore-password
+        key: password
+  issuerRef:
+    name: keycloak-signing-selfsigned
+    kind: Issuer

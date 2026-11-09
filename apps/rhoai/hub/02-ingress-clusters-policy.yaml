@@ -1,0 +1,212 @@
+apiVersion: policy.open-cluster-management.io/v1
+kind: Policy
+metadata:
+  name: rhoai-ingress-clusters
+  namespace: redhat-ai-grid
+  annotations:
+    argocd.argoproj.io/sync-wave: "4"
+spec:
+  remediationAction: enforce
+  disabled: false
+  hubTemplateOptions:
+    serviceAccountName: rhoai-tenant-templating
+  policy-templates:
+    - objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1
+        kind: ConfigurationPolicy
+        metadata:
+          name: rhoai-authorino-home-keycloak-ca
+        spec:
+          remediationAction: enforce
+          severity: high
+          namespaceSelector:
+            include:
+              - kuadrant-system
+          object-templates-raw: |
+            {{hub- $hubKeycloak := lookup "route.openshift.io/v1" "Route" "maas-db" "keycloak" hub}}
+            {{hub- if $hubKeycloak hub}}
+            # Its own key: Authorino mounts this ConfigMap in one directory with
+            # odh-trusted-ca-bundle, whose key is ca-bundle.crt, and a second
+            # ca-bundle.crt would replace the system bundle (Keycloak behind a
+            # public certificate then fails OIDC discovery). mustonlyhave drops
+            # the old key from existing ConfigMaps.
+            - complianceType: mustonlyhave
+              objectDefinition:
+                apiVersion: v1
+                kind: ConfigMap
+                metadata:
+                  name: home-keycloak-ca
+                  namespace: kuadrant-system
+                binaryData:
+                  home-keycloak-ca.crt: '{{hub fromConfigMap "openshift-config-managed" "default-ingress-cert" "ca-bundle.crt" | base64enc hub}}'
+            {{hub- else hub}}
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: v1
+                kind: ConfigMap
+                metadata:
+                  name: home-keycloak-ca
+                  namespace: kuadrant-system
+            {{hub- end hub}}
+            {{- if (lookup "operator.authorino.kuadrant.io/v1beta1" "Authorino" "kuadrant-system" "authorino") }}
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: operator.authorino.kuadrant.io/v1beta1
+                kind: Authorino
+                metadata:
+                  name: authorino
+                  namespace: kuadrant-system
+                spec:
+                  volumes:
+                    defaultMode: 420
+                    items:
+                      - name: trusted-ca-bundle
+                        mountPath: /etc/pki/tls/certs
+                        configMaps:
+                          - odh-trusted-ca-bundle
+                          - openshift-service-ca.crt
+                          - home-keycloak-ca
+            {{- end }}
+
+    - objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1
+        kind: ConfigurationPolicy
+        metadata:
+          name: rhoai-tenant-oidc-client-secret
+        spec:
+          remediationAction: enforce
+          severity: high
+          # The AITenant's tenant namespace (its status.tenantNamespace, where
+          # rhoai-maastenantconfig puts the MaasTenantConfig), not the AITenant's
+          # own namespace: ai-gateway-controller reads spec.oidc.clientSecretRef
+          # there.
+          namespaceSelector:
+            include:
+              - models-as-a-service
+          object-templates:
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: v1
+                kind: Secret
+                metadata:
+                  name: tenant-demo-oidc-client
+                  namespace: models-as-a-service
+                type: Opaque
+                data:
+                  clientSecret: '{{hub fromSecret "maas-db" "keycloak-secrets" "KEYCLOAK_CLIENT_SECRET" hub}}'
+
+    - objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1
+        kind: ConfigurationPolicy
+        metadata:
+          name: rhoai-aitenant
+        spec:
+          remediationAction: enforce
+          severity: high
+          namespaceSelector:
+            include:
+              - ai-tenants
+          object-templates:
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: maas.opendatahub.io/v1alpha1
+                kind: AITenant
+                metadata:
+                  name: models-as-a-service
+                  namespace: ai-tenants
+                  annotations:
+                    maas.opendatahub.io/retain-api-keys-on-delete: "true"
+                spec:
+                  gateway:
+                    name: maas-default-gateway
+                  oidc:
+                    accessTokenPurpose: access
+                    accessTokenPurposeClaim: token_use
+                    clientId: tenant-demo
+                    audience: tenant-demo
+                    clientSecretRef:
+                      name: tenant-demo-oidc-client
+                      key: clientSecret
+                    # Keycloak on the cluster labelled ai-grid/external-services, at the default Route
+                    # host under its apps domain, else Keycloak on the hub.
+                    issuerUrl: '{{hub $homes := (lookup "cluster.open-cluster-management.io/v1" "ManagedCluster" "" "" "ai-grid/external-services=true").items hub}}{{hub if $homes hub}}{{hub range (index $homes 0).status.clusterClaims hub}}{{hub if eq .name "consoleurl.cluster.open-cluster-management.io" hub}}{{hub printf "https://keycloak-maas-db.%s/realms/saas" (splitn "." 2 (replace "https://" "" .value))._1 hub}}{{hub end hub}}{{hub end hub}}{{hub else hub}}{{hub printf "https://%s/realms/saas" (index (lookup "route.openshift.io/v1" "Route" "maas-db" "keycloak").status.ingress 0).host hub}}{{hub end hub}}'
+
+    - objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1
+        kind: ConfigurationPolicy
+        metadata:
+          name: rhoai-maastenantconfig
+        spec:
+          remediationAction: enforce
+          severity: high
+          namespaceSelector:
+            include:
+              - models-as-a-service
+          object-templates:
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: maas.opendatahub.io/v1alpha1
+                kind: MaasTenantConfig
+                metadata:
+                  name: default-tenant
+                  namespace: models-as-a-service
+                spec:
+                  telemetry:
+                    enabled: true
+                    metrics:
+                      captureModelUsage: true
+                      captureUser: true
+                      captureGroup: true
+                      captureOrganization: true
+                    logs:
+                      captureUser: true
+                      captureOrganization: true
+
+    - objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1
+        kind: ConfigurationPolicy
+        metadata:
+          name: rhoai-grid-external-provider
+        spec:
+          remediationAction: enforce
+          severity: high
+          namespaceSelector:
+            include:
+              - models-as-a-service
+          object-templates:
+            # Fake API Key for external model -> local Grid GW connection
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: v1
+                kind: Secret
+                metadata:
+                  name: grid-maas-upstream
+                  namespace: models-as-a-service
+                  annotations:
+                    argocd.argoproj.io/sync-wave: "1"
+                type: Opaque
+                stringData:
+                  api-key: "dW51c2VkLWJ5LWNsdXN0ZXItbG9jYWwtZ3JpZA=="
+
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: inference.opendatahub.io/v1alpha1
+                kind: ExternalProvider
+                metadata:
+                  annotations:
+                    inference.opendatahub.io/port: "443"
+                    inference.opendatahub.io/tls: "true"
+                    argocd.argoproj.io/sync-wave: "2"
+                  name: grid-provider
+                  namespace: models-as-a-service
+                spec:
+                  auth:
+                    secretRef:
+                      name: grid-maas-upstream
+                    type: apikey
+                  endpoint: grid-gateway.redhat-ai-grid.svc.cluster.local
+                  provider: openai
+                  config:
+                    # Verify the gateway's service-ca certificate. A path already mounted in the
+                    # calling proxy; the controller never reads certificate bytes.
+                    tls.caCertificates: /var/run/secrets/kubernetes.io/serviceaccount/service-ca.crt

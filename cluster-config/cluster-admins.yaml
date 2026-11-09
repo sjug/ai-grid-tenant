@@ -1,0 +1,5 @@
+# This deployment's cluster admins. Overrides cluster_admins in values.yaml.
+# The name `oc whoami` reports after signing in through the clusters' identity
+# provider; kubeadmin needs no entry.
+cluster_admins:
+  - sjug

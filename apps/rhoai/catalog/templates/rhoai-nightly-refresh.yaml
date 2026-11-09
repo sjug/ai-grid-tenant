@@ -25,6 +25,7 @@ rules:
       - subscriptions
     verbs:
       - get
+      - create
       - delete
   - apiGroups:
       - operators.coreos.com
@@ -168,8 +169,21 @@ spec:
                 # On a fresh install nothing would recreate a deleted Subscription until this sync ends.
                 if [[ -n "${installed_image}" ]]; then
                   echo "Refreshing ${subscription_namespace}/${subscription_name} by recreating the Subscription"
+                  # Argo applies the Subscription only after this Job finishes, so the Job recreates it itself.
+                  subscription_field() {
+                    local value
+                    value="$(oc get subscription.operators.coreos.com "${subscription_name}" -n "${subscription_namespace}" \
+                      -o jsonpath="{${1}}")"
+                    printf '%s' "${value:-{\}}"
+                  }
+                  subscription_spec="$(subscription_field .spec)"
+                  subscription_labels="$(subscription_field .metadata.labels)"
+                  subscription_annotations="$(subscription_field .metadata.annotations)"
                   oc delete subscription.operators.coreos.com "${subscription_name}" -n "${subscription_namespace}"
                   oc delete csv "${desired_csv}" -n "${subscription_namespace}" --ignore-not-found=true
+                  printf '{"apiVersion":"operators.coreos.com/v1alpha1","kind":"Subscription","metadata":{"name":"%s","namespace":"%s","labels":%s,"annotations":%s},"spec":%s}' \
+                    "${subscription_name}" "${subscription_namespace}" "${subscription_labels}" "${subscription_annotations}" "${subscription_spec}" \
+                    | oc create -f -
                 else
                   echo "No ${desired_csv} installed; waiting for OLM to install it"
                 fi

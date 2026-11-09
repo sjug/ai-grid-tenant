@@ -62,9 +62,9 @@ spec:
           # RHOAI's MaaS and AI gateway controllers (redhat-ods-applications carries openshift.io/cluster-monitoring,
           # so the platform Prometheus scrapes their ServiceMonitors): reconcile counts, errors and durations, queue depth.
           - '{__name__=~"controller_runtime_(reconcile_total|reconcile_errors_total|reconcile_time_seconds_(bucket|sum|count)|active_workers|max_concurrent_reconciles)|workqueue_(depth|adds_total|queue_duration_seconds_(bucket|sum|count)|retries_total)|rest_client_requests_total",namespace="redhat-ods-applications"}'
-  # Both Kuadrant's istio-pod-monitor (MaaS sites) and the ai-grid gateway PodMonitor (inference sites)
-  # deliver the full gateway Envoy statistics; RHOAI's openshift-ai-inference-metrics PodMonitor delivers the
-  # Istio request families once more for the serving gateway. One copy per site reaches the hub.
+  # Kuadrant's istio-pod-monitor delivers the full gateway Envoy statistics on every site; RHOAI's
+  # openshift-ai-inference-metrics PodMonitor delivers the Istio request families once more for the serving
+  # gateway. One copy per site reaches the hub.
   # The agents federate without honor_labels: when this rule runs, the source job name is in exported_job
   # (job already carries this ScrapeConfig's own name); the agents' remote-write relabeling restores it to
   # job afterwards, which is why the hub's Thanos shows the source job names.

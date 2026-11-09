@@ -1,0 +1,39 @@
+# The Loki operator, a prerequisite of the hub store.
+#
+# The ai-grid-o11y-hub subchart renders the LokiStack but not the operator that
+# reconciles it: that is the parent chart's dependencies.loki, and this
+# Application targets the subchart directly. A dedicated hub runs no RHOAI, so
+# nothing else brings it either.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: openshift-operators-redhat
+  labels:
+    openshift.io/cluster-monitoring: "true"
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+---
+apiVersion: operators.coreos.com/v1
+kind: OperatorGroup
+metadata:
+  name: openshift-operators-redhat
+  namespace: openshift-operators-redhat
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+spec: {}
+---
+apiVersion: operators.coreos.com/v1alpha1
+kind: Subscription
+metadata:
+  name: loki-operator
+  namespace: openshift-operators-redhat
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  # stable-6.5, matching the parent chart's dependencies.loki, so the hub and
+  # the sites run the same Loki operator version.
+  channel: stable-6.5
+  name: loki-operator
+  source: redhat-operators
+  sourceNamespace: openshift-marketplace
+  installPlanApproval: Automatic

@@ -24,6 +24,8 @@ What the hub delivers to every site, by policy and Argo CD:
 - The grid CA, the site's identity certificate, and its rotation.
 - Grid CRDs, the grid operator and gateways, and RHOAI in the site's role.
 - Submariner, and the MaaS database credentials.
+- ACM Search's collector, so the provider console can read the site's GPUs and
+  MaaSSubscriptions.
 
 ## Deployment options
 
@@ -105,3 +107,4 @@ Guide: [AI project onboarding](ai-project-onboarding/README.md).
 | Models and MaaS objects | apps/acm-models |
 | MaaS database | apps/maas-db |
 | Submariner | apps/acm/submariner |
+| ACM Search collector on every managed cluster | apps/acm/manifests/search |

@@ -1,0 +1,130 @@
+# Identity ACM resolves this app's spoke Policy hub templates as.
+#
+# The endpoint cannot be a literal: it is the ingest Route's host, which differs
+# per fleet, and `helm lookup` cannot supply it because the Argo CD repo-server
+# renders without cluster access. So the Policy carries an ACM `{{hub lookup ...
+# hub}}` template instead, resolved on the hub by the propagator.
+#
+# The propagator's own access is limited to the Policy's namespace and the target
+# ManagedCluster, which does not include the Route. `spec.hubTemplateOptions`
+# widens that to a named ServiceAccount (ACM 2.12+), and it applies to *every*
+# template in the Policy -- both credentials' `fromSecret` included. Hence two
+# Roles: the Route in redhat-ods-monitoring, which belongs to
+# apps/ai-grid-o11y's LokiStack, and the writer and reader tokens in
+# ai-grid-policies.
+#
+# Granted narrowly on purpose: `resourceNames` pins the single object each rule
+# needs. The unpinned `list`/`watch` rules are not padding -- ACM's template
+# resolution requires them alongside `get`, and the RBAC API cannot attach
+# resourceNames to either verb.
+#
+# Verified rather than assumed. With a ServiceAccount holding only the pinned
+# `get`, the propagator leaves `{{hub ... hub}}` in the replicated Policy
+# verbatim and logs nothing; adding `list` and `watch` as the single changed
+# variable makes the same template resolve to the Route's host. So this cannot
+# be tightened further without ACM changing.
+#
+# Note the consequence, because it is easy to miss: `list` on Secrets returns
+# their data, so this ServiceAccount can read every Secret in
+# spokePolicy.namespace, not just the writer token. Keep that namespace for
+# policy credentials alone.
+#
+# Modelled on apps/keycloak/manifests/public-url-policy.yaml, which does the same
+# thing for Keycloak's public URL.
+#
+# Wave 4: before the Policy in wave 5, after the store that owns the Route.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: usage-logs-templating
+  # The Policy's namespace: ACM resolves serviceAccountName there.
+  namespace: ai-grid-policies
+  annotations:
+    argocd.argoproj.io/sync-wave: "4"
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: usage-logs-templating
+  namespace: redhat-ods-monitoring
+  annotations:
+    argocd.argoproj.io/sync-wave: "4"
+rules:
+  - apiGroups:
+      - route.openshift.io
+    resources:
+      - routes
+    resourceNames:
+      - usage-logs
+    verbs:
+      - get
+  - apiGroups:
+      - route.openshift.io
+    resources:
+      - routes
+    verbs:
+      - list
+      - watch
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: usage-logs-templating
+  namespace: redhat-ods-monitoring
+  annotations:
+    argocd.argoproj.io/sync-wave: "4"
+subjects:
+  - kind: ServiceAccount
+    name: usage-logs-templating
+    namespace: ai-grid-policies
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: usage-logs-templating
+---
+# The same ServiceAccount also resolves the credential's `fromSecret`, which the
+# propagator would otherwise have reached on its own.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: usage-logs-templating
+  namespace: ai-grid-policies
+  annotations:
+    argocd.argoproj.io/sync-wave: "4"
+# The same ServiceAccount also resolves both credentials' `fromSecret`, which the
+# propagator would otherwise have reached on its own. The reader token joins the
+# writer's in the pinned resourceNames; both are read through the same unpinned
+# `list`/`watch` rules above, which ACM's template resolution requires anyway.
+rules:
+  - apiGroups:
+      - ""
+    resources:
+      - secrets
+    resourceNames:
+      - usage-logs-hub-credential
+      - usage-logs-hub-read-credential
+    verbs:
+      - get
+  - apiGroups:
+      - ""
+    resources:
+      - secrets
+    verbs:
+      - list
+      - watch
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: usage-logs-templating
+  namespace: ai-grid-policies
+  annotations:
+    argocd.argoproj.io/sync-wave: "4"
+subjects:
+  - kind: ServiceAccount
+    name: usage-logs-templating
+    namespace: ai-grid-policies
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: usage-logs-templating

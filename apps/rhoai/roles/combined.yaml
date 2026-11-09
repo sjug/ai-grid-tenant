@@ -1,3 +1,10 @@
-# A combined spoke is ingress and inference at once: the values in
-# apps/rhoai/values.yaml, plus the provider gateway and models.
-{}
+profile: ai-grid-combined
+
+dependencies:
+  rhcl:
+    config:
+      authorinoTrustedCA:
+        configMaps:
+          - odh-trusted-ca-bundle
+          - openshift-service-ca.crt
+          - home-keycloak-ca

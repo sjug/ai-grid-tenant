@@ -1,0 +1,88 @@
+# Every managed cluster but the hub runs ACM Search's collector, so Search indexes its resources.
+# The provider console's backend reads a site's GPUs and its MaaSSubscriptions through Search.
+#
+# ACM leaves the add-on off on clusters imported without a KlusterletAddonConfig, as
+# docs/acm/cluster-onboarding/import-managed-cluster.sh does, and the MultiClusterHub operator
+# server-side applies ClusterManagementAddOn search-collector with installStrategy Manual on every
+# reconcile, so a Placements install strategy there would be reverted. A hub policy therefore
+# creates the ManagedClusterAddOn in each cluster's namespace, as a KlusterletAddonConfig with
+# searchCollector enabled would.
+#
+# Skipped:
+# - the hub (label local-cluster=true): the search operator runs the hub's own collector;
+# - a cluster with a KlusterletAddonConfig: the klusterlet-addon-controller owns its add-ons and
+#   deletes search-collector when that config disables it, so this policy leaves it alone;
+# - a cluster being deleted, or whose namespace doesn't exist yet.
+#
+# pruneObjectBehavior DeleteIfCreated: an add-on this policy created goes when the cluster drops
+# out of the list or the policy is deleted; one created any other way is never deleted.
+apiVersion: cluster.open-cluster-management.io/v1beta1
+kind: Placement
+metadata:
+  name: search-collector-hub
+  namespace: open-cluster-management
+  annotations:
+    argocd.argoproj.io/sync-wave: "3"
+spec:
+  clusterSets:
+    - global
+  predicates:
+    - requiredClusterSelector:
+        labelSelector:
+          matchLabels:
+            local-cluster: "true"
+---
+apiVersion: policy.open-cluster-management.io/v1
+kind: Policy
+metadata:
+  name: search-collector
+  namespace: open-cluster-management
+  annotations:
+    argocd.argoproj.io/sync-wave: "5"
+spec:
+  disabled: false
+  remediationAction: enforce
+  policy-templates:
+    - objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1
+        kind: ConfigurationPolicy
+        metadata:
+          name: search-collector
+        spec:
+          remediationAction: enforce
+          severity: medium
+          pruneObjectBehavior: DeleteIfCreated
+          evaluationInterval:
+            compliant: watch
+            noncompliant: watch
+          object-templates-raw: |
+            {{- range (lookup "cluster.open-cluster-management.io/v1" "ManagedCluster" "" "" "local-cluster!=true").items }}
+            {{- $cluster := .metadata.name }}
+            {{- if and (not .metadata.deletionTimestamp) (lookup "v1" "Namespace" "" $cluster) (not (lookup "agent.open-cluster-management.io/v1" "KlusterletAddonConfig" $cluster $cluster)) }}
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: addon.open-cluster-management.io/v1alpha1
+                kind: ManagedClusterAddOn
+                metadata:
+                  name: search-collector
+                  namespace: {{ $cluster }}
+                spec:
+                  installNamespace: open-cluster-management-agent-addon
+            {{- end }}
+            {{- end }}
+---
+apiVersion: policy.open-cluster-management.io/v1
+kind: PlacementBinding
+metadata:
+  name: search-collector
+  namespace: open-cluster-management
+  annotations:
+    argocd.argoproj.io/sync-wave: "5"
+placementRef:
+  apiGroup: cluster.open-cluster-management.io
+  kind: Placement
+  name: search-collector-hub
+subjects:
+  - apiGroup: policy.open-cluster-management.io
+    kind: Policy
+    name: search-collector

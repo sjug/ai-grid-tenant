@@ -1,0 +1,160 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: keycloak-redirect-uris
+  annotations:
+    argocd.argoproj.io/sync-wave: "5"
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: keycloak-redirect-uris
+  annotations:
+    argocd.argoproj.io/sync-wave: "5"
+rules:
+  - apiGroups:
+      - cluster.open-cluster-management.io
+    resources:
+      - managedclusters
+    verbs:
+      - get
+      - list
+      - watch
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: keycloak-redirect-uris
+  annotations:
+    argocd.argoproj.io/sync-wave: "5"
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: keycloak-redirect-uris
+subjects:
+  - kind: ServiceAccount
+    name: keycloak-redirect-uris
+    namespace: maas-db
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: keycloak-redirect-uris
+  annotations:
+    argocd.argoproj.io/sync-wave: "6"
+spec:
+  schedule: "*/5 * * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      activeDeadlineSeconds: 300
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: keycloak-redirect-uris
+        spec:
+          serviceAccountName: keycloak-redirect-uris
+          restartPolicy: Never
+          initContainers:
+            - name: discover-uris
+              image: registry.redhat.io/openshift4/ose-cli@sha256:75bd612f3d2b4dbddcbd7a48e12b5cb4d36e4a2683e7f48209e40596e0fbfc30
+              imagePullPolicy: IfNotPresent
+              command:
+                - /bin/bash
+                - -c
+                - |
+                  set -Eeuo pipefail
+
+                  selector='ai-grid/enabled=true,ai-grid/role in (ingress,combined)'
+                  : > /shared/redirect-uris
+
+                  while IFS= read -r cluster_name; do
+                    [[ -n "$cluster_name" ]] || continue
+                    console_url="$(oc get managedcluster "$cluster_name" \
+                      -o jsonpath='{.status.clusterClaims[?(@.name=="consoleurl.cluster.open-cluster-management.io")].value}')"
+                    [[ "$console_url" == https://console-openshift-console.apps.* ]] || {
+                      echo "ERROR: cluster $cluster_name has no console apps-domain claim" >&2
+                      exit 1
+                    }
+                    apps_domain="${console_url#https://console-openshift-console.apps.}"
+                    apps_domain="${apps_domain%/}"
+                    printf 'https://maas.apps.%s/oauth2/callback\n' "$apps_domain" >> /shared/redirect-uris
+                  done < <(oc get managedclusters -l "$selector" -o name | sed 's|^managedcluster.cluster.open-cluster-management.io/||')
+
+                  printf 'http://localhost:8000/callback\n' >> /shared/redirect-uris
+                  sort -u /shared/redirect-uris -o /shared/redirect-uris
+              resources:
+                requests:
+                  cpu: 10m
+                  memory: 32Mi
+                limits:
+                  memory: 64Mi
+              volumeMounts:
+                - name: redirect-uris
+                  mountPath: /shared
+          containers:
+            - name: update-client
+              image: quay.io/keycloak/keycloak:26.8.0
+              imagePullPolicy: IfNotPresent
+              command:
+                - /bin/bash
+                - -c
+                - |
+                  set -Eeuo pipefail
+
+                  redirect_uris='['
+                  first=true
+                  while IFS= read -r redirect_uri; do
+                    [[ -n "$redirect_uri" ]] || continue
+                    if [[ "$first" == true ]]; then
+                      first=false
+                    else
+                      redirect_uris+=','
+                    fi
+                    redirect_uris+="\"$redirect_uri\""
+                  done < /shared/redirect-uris
+                  redirect_uris+=']'
+                  kcadm_config=/tmp/kcadm.config
+
+                  /opt/keycloak/bin/kcadm.sh config credentials \
+                    --config "$kcadm_config" \
+                    --server http://keycloak.maas-db.svc.cluster.local:8080 \
+                    --realm saas \
+                    --client keycloak-redirect-uris \
+                    --secret "$KEYCLOAK_REDIRECT_URIS_CLIENT_SECRET" >/dev/null
+
+                  client_uuid="$(/opt/keycloak/bin/kcadm.sh get clients \
+                    --config "$kcadm_config" \
+                    --realm saas \
+                    --query "clientId=$KEYCLOAK_CLIENT_ID" \
+                    --fields id | sed -n 's/.*"id" *: *"\([^"]*\)".*/\1/p' | head -1)"
+                  [[ -n "$client_uuid" ]] || {
+                    echo "ERROR: Keycloak client $KEYCLOAK_CLIENT_ID was not found" >&2
+                    exit 1
+                  }
+
+                  /opt/keycloak/bin/kcadm.sh update "clients/$client_uuid" \
+                    --config "$kcadm_config" \
+                    --realm saas \
+                    --set "redirectUris=$redirect_uris"
+              envFrom:
+                - secretRef:
+                    name: keycloak-secrets
+                - secretRef:
+                    name: keycloak-redirect-uris-secret
+              resources:
+                requests:
+                  cpu: 10m
+                  memory: 128Mi
+                limits:
+                  memory: 256Mi
+              volumeMounts:
+                - name: redirect-uris
+                  mountPath: /shared
+                  readOnly: true
+          volumes:
+            - name: redirect-uris
+              emptyDir: {}

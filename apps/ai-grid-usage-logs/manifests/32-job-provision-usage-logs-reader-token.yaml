@@ -1,0 +1,127 @@
+# Mint the hub usage-log reader token and record the query endpoint,
+# replacing the former create-reader-token.sh. Both are stored in the Secret
+# the spoke Policy ships to every selected site's read consumer; ACM reads it
+# with fromSecret and delivers $ocm_encrypted ciphertext, so neither value
+# ever appears in a managed cluster's manifest.
+#
+# The endpoint cannot be rendered by the chart: the store Route's host differs
+# per fleet and the Argo CD repo-server renders without cluster access. The
+# Job therefore discovers the Route at runtime and derives the tenant root
+# from it -- the same derivation the Policy's hub template uses for the ingest
+# endpoint, minus the /otlp suffix, because the consumer appends the Loki API
+# paths itself.
+#
+# The identity is read-only -- `get` on the infrastructure tenant, no
+# `create` -- so a leaked token exposes usage records but cannot corrupt them.
+#
+# Idempotent: if the stored token is still a JWT with more than a week left
+# before expiry *and* the recorded endpoint already matches the Route, the Job
+# does nothing. So a repeated sync (PostSync hooks run on every sync) does not
+# rotate a healthy credential, while expiry, deletion of the Secret, a Route
+# host change, or a manually shortened token triggers a re-mint on the next
+# sync -- rotation is the same operation as creation.
+#
+# Wave ordering is handled by the hook type: PostSync runs after every wave of
+# this Application. The Loki operator may still be reconciling the Route at
+# that point, so the Job waits for its host rather than failing.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  generateName: provision-usage-logs-reader-token-
+  namespace: redhat-ods-monitoring
+  annotations:
+    argocd.argoproj.io/hook: PostSync
+    argocd.argoproj.io/hook-delete-policy: HookSucceeded
+spec:
+  template:
+    spec:
+      serviceAccountName: usage-logs-token-provisioner
+      containers:
+        - name: create-secret
+          image: registry.redhat.io/openshift4/ose-cli:latest
+          command: ["/bin/bash", "-c"]
+          args:
+            - |
+              set -Eeuo pipefail
+
+              SA_NAMESPACE=redhat-ods-monitoring
+              SA_NAME=usage-logs-reader
+              ROUTE_NAMESPACE=redhat-ods-monitoring
+              ROUTE_NAME=usage-logs
+              SECRET_NAMESPACE=ai-grid-policies
+              SECRET_NAME=usage-logs-hub-read-credential
+              TOKEN_DURATION=8760h
+
+              # The Loki operator creates the Route from
+              # apps/ai-grid-o11y's LokiStack, so it exists without this app
+              # rendering a store -- but not until that app has synced and the
+              # operator has reconciled. Wait rather than fail: the Job runs
+              # as a PostSync hook, and the Route appearing late is normal.
+              endpoint=""
+              for _ in $(seq 1 60); do
+                route_host="$(oc get route ${ROUTE_NAME} -n ${ROUTE_NAMESPACE} \
+                  -o jsonpath='{.status.ingress[0].host}' 2>/dev/null || true)"
+                [ -n "$route_host" ] && endpoint="https://${route_host}/api/logs/v1/infrastructure" && break
+                sleep 10
+              done
+              [ -n "$endpoint" ] || { echo "route ${ROUTE_NAMESPACE}/${ROUTE_NAME} has no ingress host after 10 minutes: let the ai-grid-o11y Application sync and the Loki operator reconcile first" >&2; exit 1; }
+
+              # The same mistakes the chart's Helm validation used to catch,
+              # kept because this Secret is the only source of the endpoint: a
+              # /otlp suffix is the ingest route (every query 404s), and any
+              # other path is not the tenant root the consumer appends the
+              # Loki API paths to.
+              case "$endpoint" in
+                https://*) ;;
+                *) echo "endpoint does not start with https://: $endpoint" >&2; exit 1 ;;
+              esac
+              case "$endpoint" in
+                */otlp|*/otlp/*) echo "endpoint must not contain /otlp: that is the ingest route, which answers every query with 404 (got: $endpoint)" >&2; exit 1 ;;
+              esac
+              case "$endpoint" in
+                https://*/api/logs/v1/infrastructure) ;;
+                *) echo "endpoint must be the tenant root https://<host>/api/logs/v1/infrastructure (got: $endpoint)" >&2; exit 1 ;;
+              esac
+
+              current="$(oc get secret ${SECRET_NAME} -n ${SECRET_NAMESPACE} \
+                -o jsonpath='{.data.token}' 2>/dev/null | base64 -d || true)"
+              current_endpoint="$(oc get secret ${SECRET_NAME} -n ${SECRET_NAMESPACE} \
+                -o jsonpath='{.data.endpoint}' 2>/dev/null | base64 -d || true)"
+              if [ -n "$current" ]; then
+                # base64url-decode the JWT payload to read its expiry. A
+                # leftover buffer of one week keeps a healthy token from being
+                # re-minted on every sync while still rotating well before it
+                # lapses.
+                payload="$(printf '%s' "$current" | cut -d. -f2 | tr '_-' '/+')"
+                case $((${#payload} % 4)) in
+                  2) payload="${payload}==" ;;
+                  3) payload="${payload}=" ;;
+                esac
+                exp="$(printf '%s' "$payload" | base64 -d 2>/dev/null \
+                  | tr ',' '\n' | sed -n 's/.*"exp":\([0-9][0-9]*\).*/\1/p')"
+                if [ -n "$exp" ] && [ "$exp" -gt $(( $(date +%s) + 604800 )) ] \
+                  && [ "$current_endpoint" = "$endpoint" ]; then
+                  echo "Token for ${SA_NAMESPACE}/${SA_NAME} is still valid and the endpoint is unchanged; nothing to do."
+                  exit 0
+                fi
+              fi
+
+              # Never write an empty or truncated credential: the Policy would
+              # ship it to every site and each consumer would fail to
+              # authenticate with no clear cause.
+              token="$(oc create token ${SA_NAME} -n ${SA_NAMESPACE} --duration=${TOKEN_DURATION})"
+              [ -n "$token" ] || { echo "failed to create a token for ${SA_NAMESPACE}/${SA_NAME}" >&2; exit 1; }
+              case "$token" in
+                *.*.*) ;;
+                *) echo "token for ${SA_NAMESPACE}/${SA_NAME} is not a JWT; refusing to write it" >&2; exit 1 ;;
+              esac
+
+              oc create secret generic ${SECRET_NAME} -n ${SECRET_NAMESPACE} \
+                --from-literal=token="$token" \
+                --from-literal=endpoint="$endpoint" \
+                --dry-run=client -o yaml | oc apply -f -
+
+              echo "Created or updated ${SECRET_NAMESPACE}/${SECRET_NAME} from ${SA_NAMESPACE}/${SA_NAME}."
+              echo "Query endpoint recorded from route ${ROUTE_NAMESPACE}/${ROUTE_NAME}."
+      restartPolicy: Never
+  backoffLimit: 2

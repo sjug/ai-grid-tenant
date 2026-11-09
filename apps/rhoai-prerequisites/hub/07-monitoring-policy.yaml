@@ -1,8 +1,8 @@
 # Monitoring on every cluster, for the AI Grid's own metrics and the performance campaign:
 # user-workload monitoring on (the grid, MaaS, EPP and MetalLB ServiceMonitors are scraped
-# by nobody without it), persistent storage and retention for both Prometheus instances, and
-# the Cluster Observability Operator, which the RHOAI monitoring stack (MonitoringStack API)
-# needs on every site; on the hub the ACM addon installed it, the spokes had nothing.
+# by nobody without it) and persistent storage and retention for both Prometheus instances.
+# The Cluster Observability Operator comes from the RHOAI chart on spokes and from ACM on
+# the hub (apps/rhoai/hub/01-applicationset.yaml).
 apiVersion: policy.open-cluster-management.io/v1
 kind: Policy
 metadata:
@@ -62,39 +62,3 @@ spec:
                           resources:
                             requests:
                               storage: 100Gi
-    - objectDefinition:
-        apiVersion: policy.open-cluster-management.io/v1
-        kind: ConfigurationPolicy
-        metadata:
-          name: rhoai-cluster-observability-operator
-        spec:
-          remediationAction: enforce
-          severity: medium
-          object-templates:
-            - complianceType: musthave
-              objectDefinition:
-                apiVersion: v1
-                kind: Namespace
-                metadata:
-                  name: openshift-cluster-observability-operator
-            - complianceType: musthave
-              objectDefinition:
-                apiVersion: operators.coreos.com/v1
-                kind: OperatorGroup
-                metadata:
-                  name: openshift-cluster-observability-operator
-                  namespace: openshift-cluster-observability-operator
-                spec: {}
-            - complianceType: musthave
-              objectDefinition:
-                apiVersion: operators.coreos.com/v1alpha1
-                kind: Subscription
-                metadata:
-                  name: cluster-observability-operator
-                  namespace: openshift-cluster-observability-operator
-                spec:
-                  channel: stable
-                  installPlanApproval: Automatic
-                  name: cluster-observability-operator
-                  source: redhat-operators
-                  sourceNamespace: openshift-marketplace

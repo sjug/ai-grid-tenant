@@ -1,0 +1,14 @@
+{{- if .Values.operatorGroup.create }}
+# OLM allows one OperatorGroup per namespace, and LVMS uses this same one.
+apiVersion: operators.coreos.com/v1
+kind: OperatorGroup
+metadata:
+  name: openshift-storage
+  namespace: openshift-storage
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+    argocd.argoproj.io/sync-options: Prune=false,Delete=false
+spec:
+  targetNamespaces:
+    - openshift-storage
+{{- end }}

@@ -23,6 +23,12 @@ args="$*"; S="$STUB_STATE"
 count() { local f="$S/$1" n; n=$(cat "$f" 2>/dev/null || echo 0); echo $((n+1)) > "$f"; echo "$n"; }
 case "$args" in
   *"get subscription.operators.coreos.com"*"{.spec.source}"*) printf '%s' "$STUB_SOURCE" ;;
+  *"get subscription.operators.coreos.com"*"jsonpath={.spec}"*) printf '{"channel":"stable-3.6","name":"rhods-operator","source":"rhoai-catalog-dev"}' ;;
+  *"get subscription.operators.coreos.com"*"jsonpath={.metadata.labels}"*) printf '' ;;
+  *"get subscription.operators.coreos.com"*"jsonpath={.metadata.annotations}"*) printf '{"argocd.argoproj.io/tracking-id":"app:operators.coreos.com/Subscription:redhat-ods-operator/rhods-operator"}' ;;
+  *"create -f -"*) m=$(cat); grep -q deleted-csv "$S/deletes" 2>/dev/null || { echo "create before delete" >&2; exit 1; }
+    python3 -c 'import json,sys; d=json.loads(sys.argv[1]); assert d["kind"]=="Subscription" and d["spec"]["source"] and d["metadata"]["labels"]=={} and "argocd.argoproj.io/tracking-id" in d["metadata"]["annotations"]' "$m" || exit 1
+    echo created-sub >> "$S/deletes" ;;
   *"get packagemanifests"*) printf '%b' "$STUB_CHANNELS" ;;
   *"delete subscription.operators.coreos.com"*) echo deleted-sub >> "$S/deletes" ;;
   *"delete csv"*) echo deleted-csv >> "$S/deletes" ;;
@@ -49,10 +55,10 @@ t() { # name expected_rc expected_deletes [ENV=VAL ...]
   else printf '   FAIL %-36s rc=%s wanted %s deletes=%s wanted %s\n%s\n' "$name" "$rc" "$want" "${dels:-none}" "$wantdel" "$(sed 's/^/        /' <<<"$out" | tail -n 8)"; fails=$((fails+1)); fi
 }
 t already-current-no-refresh 0 "none" STUB_INSTALLED='quay.io/x/op@sha256:new'
-t refresh-completes-after-polls 0 "deleted-csv=1 deleted-sub=1"
+t refresh-completes-after-polls 0 "created-sub=1 deleted-csv=1 deleted-sub=1"
 t fresh-install-waits-no-delete 0 "none" STUB_INSTALLED=
-t olm-never-refreshes 1 "deleted-csv=1 deleted-sub=1" STUB_READY_AFTER=-1
-t deployments-never-roll-out 1 "deleted-csv=1 deleted-sub=1" STUB_ROLLOUT_AFTER=-1
+t olm-never-refreshes 1 "created-sub=1 deleted-csv=1 deleted-sub=1" STUB_READY_AFTER=-1
+t deployments-never-roll-out 1 "created-sub=1 deleted-csv=1 deleted-sub=1" STUB_ROLLOUT_AFTER=-1
 t subscription-without-source 1 "none" STUB_SOURCE='|'
 t channel-not-in-catalog 1 "none" STUB_CHANNELS='fast|rhods-operator.3.7.0|quay.io/x/op@sha256:other\n'
 echo "refresh-job tests: $((total-fails)) ok, $fails failed"; exit "$fails"

@@ -1,7 +1,7 @@
 # Shared Limitador Redis
 
 This Application owns the Redis replication cluster and the local Limitador
-storage configuration on `local-cluster`.
+storage configuration on the hub.
 
 The Redis Service is exported through Submariner. `rhoai-prerequisites`
 distributes the remote-only `kuadrant-system/limitador-redis` Secret and

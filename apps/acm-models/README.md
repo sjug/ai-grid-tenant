@@ -39,7 +39,7 @@ Grid operator is successfully scraping provider metrics.
 The provider console
 ([ai-grid-cloud/ai-grid-provider-console](https://github.com/ai-grid-cloud/ai-grid-provider-console))
 saves models and subscriptions as commits to a catalog repository,
-[ai-grid-cloud/ai-grid-1-catalog](https://github.com/ai-grid-cloud/ai-grid-1-catalog). That URL is the only
+[sjug/ai-grid-catalog](https://github.com/sjug/ai-grid-catalog). That URL is the only
 value another environment changes: it appears in the two AppProjects and the three ApplicationSets in
 `hub/catalog-*`, and in the console's `apps/console/application.yaml`.
 

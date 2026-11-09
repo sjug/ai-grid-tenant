@@ -7,9 +7,12 @@ which deploys the fleet-wide `cluster-config` ApplicationSet.
 ## Cluster admins
 
 Grants `cluster-admin` to a Git-managed list of users through per-user
-`ClusterRoleBinding` objects (`cluster-admin-<user>`). The `cluster-config`
+`ClusterRoleBinding` objects (`cluster-admin-<user>`). The list is per
+deployment: [`values.yaml`](values.yaml) leaves it empty, and a deployment
+lists its users in [`cluster-admins.yaml`](cluster-admins.yaml). Without that
+file, the chart creates no binding. The `cluster-config`
 ApplicationSet generates one automated Application for every cluster secret
-created by the shared GitOpsCluster integration, including `local-cluster`.
+created by the shared GitOpsCluster integration, including the hub.
 The hub uses Argo CD's in-cluster destination so the controller's
 ServiceAccount, rather than the ACM addon ServiceAccount, applies its RBAC.
 
@@ -31,7 +34,7 @@ instead of node ports.
 
 ### Adding or removing an admin
 
-Edit [`values.yaml`](values.yaml) and commit. Every generated Application syncs
+Edit `cluster-admins.yaml` and commit. Every generated Application syncs
 automatically (prune and self-heal are enabled):
 
 - Adding a username to `cluster_admins` creates its `ClusterRoleBinding` on
@@ -59,7 +62,7 @@ selected cluster therefore receives exactly one generated Application and one
 binding per user, with no duplicate names.
 
 The chart's Submariner gateway policy is hub-only ACM state. The
-`hubResources.enabled` parameter is true only for `local-cluster`, so managed
+`hubResources.enabled` parameter is true only for the hub, so managed
 clusters render only the fleet-wide RBAC and do not receive duplicate Policy,
 Placement, or PlacementBinding resources.
 
@@ -80,8 +83,8 @@ Placement, or PlacementBinding resources.
 Local:
 
 ```sh
-helm lint cluster-config/chart -f cluster-config/values.yaml
-helm template cluster-config/chart -f cluster-config/values.yaml
+helm lint cluster-config/chart -f cluster-config/values.yaml -f cluster-config/cluster-admins.yaml
+helm template cluster-config/chart -f cluster-config/values.yaml -f cluster-config/cluster-admins.yaml
 helm template cluster-config/chart -f cluster-config/values.yaml \
   --set hubResources.enabled=true
 ```

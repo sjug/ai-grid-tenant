@@ -1,0 +1,238 @@
+{
+  "realm": "saas",
+  "keycloakVersion": "26.8.0",
+  "accessTokenLifespan": 21600,
+  "ssoSessionIdleTimeout": 21600,
+  "enabled": true,
+  "loginWithEmailAllowed": true,
+  "organizationsEnabled": true,
+  "clients": [
+    {
+      "clientId": "${KEYCLOAK_CLIENT_ID}",
+      "name": "Multi-tenant tutorial app",
+      "baseUrl": "${KEYCLOAK_HOME_URL}",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "clientAuthenticatorType": "client-secret",
+      "secret": "${KEYCLOAK_CLIENT_SECRET}",
+      "publicClient": false,
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": false,
+      "redirectUris": [
+        "${KEYCLOAK_REDIRECT_URI}"
+      ],
+      "defaultClientScopes": [
+        "basic",
+        "acr",
+        "profile",
+        "email",
+        "roles",
+        "web-origins"
+      ],
+      "optionalClientScopes": [
+        "organization"
+      ],
+      "protocolMappers": [
+        {
+          "name": "MaaS tenant groups",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "config": {
+            "user.attribute": "maas_groups",
+            "claim.name": "groups",
+            "jsonType.label": "String",
+            "multivalued": "true",
+            "id.token.claim": "true",
+            "userinfo.token.claim": "true",
+            "access.token.claim": "true"
+          }
+        },
+        {
+          "name": "MaaS org id",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "config": {
+            "user.attribute": "maas_org_id",
+            "claim.name": "org_id",
+            "jsonType.label": "String",
+            "multivalued": "false",
+            "id.token.claim": "true",
+            "userinfo.token.claim": "true",
+            "access.token.claim": "true"
+          }
+        },
+        {
+          "name": "MaaS org name",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "config": {
+            "user.attribute": "maas_org_name",
+            "claim.name": "org_name",
+            "jsonType.label": "String",
+            "multivalued": "false",
+            "id.token.claim": "true",
+            "userinfo.token.claim": "true",
+            "access.token.claim": "true"
+          }
+        },
+        {
+          "name": "MaaS roles",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "config": {
+            "user.attribute": "maas_roles",
+            "claim.name": "roles",
+            "jsonType.label": "String",
+            "multivalued": "true",
+            "id.token.claim": "true",
+            "userinfo.token.claim": "true",
+            "access.token.claim": "true"
+          }
+        },
+        {
+          "name": "MaaS audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "consentRequired": false,
+          "config": {
+            "included.client.audience": "tenant-demo",
+            "id.token.claim": "false",
+            "access.token.claim": "true"
+          }
+        },
+        {
+          "name": "MaaS access token purpose",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-hardcoded-claim-mapper",
+          "consentRequired": false,
+          "config": {
+            "claim.name": "token_use",
+            "claim.value": "access",
+            "jsonType.label": "String",
+            "id.token.claim": "false",
+            "access.token.claim": "true",
+            "userinfo.token.claim": "false"
+          }
+        }
+      ]
+    },
+    {
+      "clientId": "keycloak-redirect-uris",
+      "name": "MaaS redirect URI reconciler",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "clientAuthenticatorType": "client-secret",
+      "secret": "${KEYCLOAK_REDIRECT_URIS_CLIENT_SECRET}",
+      "publicClient": false,
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "redirectUris": [],
+      "defaultClientScopes": [
+        "basic"
+      ]
+    },
+    {
+      "clientId": "keycloak-realm-sync",
+      "name": "saas realm sync from Git",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "clientAuthenticatorType": "client-secret",
+      "secret": "${KEYCLOAK_REALM_SYNC_CLIENT_SECRET}",
+      "publicClient": false,
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "redirectUris": [],
+      "defaultClientScopes": [
+        "basic"
+      ]
+    }
+  ],
+  "users": [
+    {
+      "username": "service-account-keycloak-redirect-uris",
+      "enabled": true,
+      "serviceAccountClientId": "keycloak-redirect-uris",
+      "clientRoles": {
+        "realm-management": [
+          "view-clients",
+          "manage-clients"
+        ]
+      }
+    },
+    {
+      "username": "service-account-keycloak-realm-sync",
+      "enabled": true,
+      "serviceAccountClientId": "keycloak-realm-sync",
+      "clientRoles": {
+        "realm-management": [
+          "manage-realm",
+          "manage-clients",
+          "manage-identity-providers",
+          "manage-users"
+        ]
+      }
+    }
+  ],
+  "components": {
+    "org.keycloak.keys.KeyProvider": [
+      {
+        "id": "c20d0bd2-97fa-4e59-98df-5c9c873bfc66",
+        "name": "saas-signing",
+        "providerId": "java-keystore",
+        "subComponents": {},
+        "config": {
+          "kid": [
+            "c20d0bd2-97fa-4e59-98df-5c9c873bfc66"
+          ],
+          "priority": [
+            "1000"
+          ],
+          "enabled": [
+            "true"
+          ],
+          "active": [
+            "true"
+          ],
+          "algorithm": [
+            "RS256"
+          ],
+          "keyUse": [
+            "SIG"
+          ],
+          "keystore": [
+            "/opt/keycloak/data/saas/keystore.jks"
+          ],
+          "keystoreType": [
+            "JKS"
+          ],
+          "keystorePassword": [
+            "${KEYCLOAK_SIGNING_KEYSTORE_PASSWORD}"
+          ],
+          "keyAlias": [
+            "saas-signing"
+          ],
+          "keyPassword": [
+            "${KEYCLOAK_SIGNING_KEYSTORE_PASSWORD}"
+          ]
+        }
+      }
+    ],
+    "org.keycloak.userprofile.UserProfileProvider": [
+      {
+        "id": "b5919e8a-046d-47e7-8a2c-f30f5ff12000",
+        "providerId": "declarative-user-profile",
+        "subComponents": {},
+        "config": {
+          "config-pieces-count": [
+            "1"
+          ],
+          "config-piece-0": [
+            "{\"unmanagedAttributePolicy\":\"ADMIN_EDIT\"}"
+          ]
+        }
+      }
+    ]
+  }
+}

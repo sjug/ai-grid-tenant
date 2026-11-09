@@ -1,0 +1,37 @@
+apiVersion: cluster.open-cluster-management.io/v1beta1
+kind: Placement
+metadata:
+  # The AITenant and MaaS tenant config go where MaaS runs: sites with role
+  # ingress or combined (as apps/ai-grid-spokes' ai-grid-ingress).
+  name: rhoai-ingress-clusters
+  namespace: redhat-ai-grid
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+spec:
+  clusterSets:
+    - global
+  predicates:
+    - requiredClusterSelector:
+        labelSelector:
+          matchLabels:
+            ai-grid/enabled: "true"
+          matchExpressions:
+            - key: ai-grid/role
+              operator: In
+              values: [ingress, combined]
+---
+apiVersion: policy.open-cluster-management.io/v1
+kind: PlacementBinding
+metadata:
+  name: rhoai-ingress-clusters
+  namespace: redhat-ai-grid
+  annotations:
+    argocd.argoproj.io/sync-wave: "4"
+placementRef:
+  apiGroup: cluster.open-cluster-management.io
+  kind: Placement
+  name: rhoai-ingress-clusters
+subjects:
+  - apiGroup: policy.open-cluster-management.io
+    kind: Policy
+    name: rhoai-ingress-clusters

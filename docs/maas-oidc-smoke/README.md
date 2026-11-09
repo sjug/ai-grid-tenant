@@ -44,9 +44,12 @@ docs/maas-oidc-smoke/scripts/maas-oidc-smoke.sh bob
 ```
 
 By default, the script discovers the Keycloak issuer from the
-`keycloak-public-url` ConfigMap and the MaaS Gateway hostname from the
-`maas-default-gateway` Gateway status. Set `GATEWAY_HOST` only when using an
-explicit hostname. The host must be a hostname, not a complete URL.
+`keycloak-public-url` ConfigMap. It selects the MaaS Gateway HTTP Host from the
+listener hostname matching `GATEWAY_PROTOCOL`, falling back to the Gateway
+status address. It connects to the Gateway status address, falling back to the
+selected host. Set `GATEWAY_HOST` to override the HTTP Host, and
+`GATEWAY_CONNECT_ADDRESS` to override the connection target; the latter may
+include a port. Both values must be hosts, not complete URLs.
 
 The inference prompt, token limit, and other cluster resource names and
 namespaces can be overridden with the
@@ -63,6 +66,11 @@ follow-up completion to return HTTP `429`. Because token usage is reported
 after a response, the probe retries up to `RATE_LIMIT_PROBE_ATTEMPTS` times.
 The test is skipped when the dynamically sized prompt would exceed
 `RATE_LIMIT_MAX_PROMPT_TOKENS`, avoiding an unsafe request payload.
+
+The result lists every skipped stage. For alice and bob, inference is required:
+a run that skips it fails instead of reporting a pass. Carol checks inventory
+only. Set `REQUIRE_INFERENCE=0` or `1` to override that, and `EXPECT_MODEL` to
+fail unless inference uses a given model.
 
 ## What the test verifies
 

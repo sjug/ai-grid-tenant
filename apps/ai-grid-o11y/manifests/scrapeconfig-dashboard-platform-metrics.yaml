@@ -1,0 +1,27 @@
+# Platform metrics the Perses dashboards query that ACM's default platform list leaves out. Each
+# cluster's own Prometheus already records them; this asks the multicluster-observability addon
+# to federate them to the hub's Thanos, next to the default platform-metrics ScrapeConfig.
+#   accelerator_gpu_utilization: the NVIDIA GPU Operator's recording rule over the DCGM exporter
+#     (PrometheusRule nvidia-dcgm-exporter in nvidia-gpu-operator); the GPU utilization panels of
+#     the cluster dashboard and the GPU column of the model dashboard's Model deployments table.
+# The addon applies a ScrapeConfig only once it is listed in its ClusterManagementAddOn:
+# rhoai-prerequisites/hub/13-rhai-metrics-addon-policy.yaml registers this one.
+apiVersion: monitoring.rhobs/v1alpha1
+kind: ScrapeConfig
+metadata:
+  name: ai-grid-dashboard-platform-metrics
+  namespace: open-cluster-management-observability
+  labels:
+    app.kubernetes.io/component: platform-metrics-collector
+    app.kubernetes.io/part-of: multicluster-observability-addon
+spec:
+  jobName: ai-grid-dashboard-platform-metrics
+  metricsPath: /federate
+  params:
+    match[]:
+      - '{__name__="accelerator_gpu_utilization"}'
+  # The same labels ACM's own platform-metrics ScrapeConfig drops, so these series carry the same
+  # labels as the default platform series next to them.
+  metricRelabelings:
+    - action: labeldrop
+      regex: managed_cluster|id

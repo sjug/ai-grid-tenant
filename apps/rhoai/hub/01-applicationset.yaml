@@ -50,18 +50,10 @@ spec:
         - repoURL: https://github.com/sjug/ai-grid-tenant.git
           targetRevision: main
           ref: values
-        # Temporary v0.3.0-rc.2 schemas until the RHOAI manifest bundle catches up.
-        # The overlay hands CRD management to Argo and protects them from pruning.
-        # See odh-gitops/components/ai-grid-crds/README.md for the ownership handoff.
-        - repoURL: https://github.com/opendatahub-io/odh-gitops.git
-          targetRevision: 44ba050152e66982c066f1f4fb6716260976e4bf # odh-gitops feature-ai-grid, pinned 2026-10-30
-          path: components/ai-grid-crds
-        # Pinned to a feature branch carrying operator.olm.createNamespace until
-        # the change is available upstream. This lets ACM own protected
-        # Namespaces while the chart still owns the OLM operator resources.
-        - repoURL: https://github.com/opendatahub-io/odh-gitops.git
-          targetRevision: 44ba050152e66982c066f1f4fb6716260976e4bf # odh-gitops feature-ai-grid, pinned 2026-10-30
-          path: charts/rhai-on-openshift-chart
+        # Immutable OCI snapshot from the 3.6.0 dev channel.
+        - repoURL: oci://ghcr.io/opendatahub-io/odh-gitops/rhai-on-openshift-chart
+          targetRevision: 3.6.0-dev.29.1
+          path: .
           helm:
             releaseName: rhai-on-openshift
             # A per-cluster file is optional, for a temporary override such as an image pin.
@@ -72,9 +64,9 @@ spec:
               - '$values/apps/rhoai/roles/{{ index .metadata.labels "ai-grid/role" }}.yaml'
               - $values/apps/rhoai/values-{{ .name }}.yaml
             parameters:
-              - name: grid-enrollment.enabled
-                value: '{{ eq (index .metadata.labels "local-cluster") "true" | toString }}'
               - name: praxis-gateway.grid.siteName
+                value: '{{ .name }}'
+              - name: praxis-provider-gateway.grid.siteName
                 value: '{{ .name }}'
               # OSD ships these namespaces; a self-managed spoke has no creator.
               - name: operator.rhoai.olm.createNamespace
@@ -83,27 +75,59 @@ spec:
               # cluster carries ai-grid/platform-namespaces=true (set before upgrading).
               - name: dependencies.loki.olm.createNamespace
                 value: '{{ if eq (index .metadata.labels "ai-grid/platform-namespaces") "true" }}false{{ else }}true{{ end }}'
-        # The enrollment service runs on the hub, so a managed cluster excludes these.
+              # RHOAIENG-99507: on the hub, RHACM's multicluster-observability-addon
+              # installs Cluster Observability Operator with its own OperatorGroup,
+              # which conflicts with the chart's (named after the package) and blocks
+              # CSV installs/upgrades, so the hub must leave the chart's COO off. That
+              # addon does not install COO on a managed spoke -- it ships only the
+              # prom-agent collectors -- so without this the spoke has no COO, RHOAI's
+              # Monitoring service stays PreconditionsFailed, no collector is created
+              # and usage logs never forward. Let the chart own COO on spokes, and
+              # RHACM own it on the hub.
+              - name: dependencies.clusterObservability.enabled
+                value: '{{ ne (index .metadata.labels "local-cluster") "true" | toString }}'
+            values: |
+              praxis-gateway:
+                networkPolicy:
+                  from:
+                    - podSelector:
+                        matchLabels:
+                          grid.opendatahub.io/gateway-client: "true"
+                    - namespaceSelector:
+                        matchLabels:
+                          network.openshift.io/policy-group: ingress
+              praxis-provider-gateway:
+                networkPolicy:
+                  from:
+                    - podSelector:
+                        matchLabels:
+                          grid.opendatahub.io/gateway-client: "true"
+                    - namespaceSelector:
+                        matchLabels:
+                          network.openshift.io/policy-group: ingress
+                    {{- with index .metadata.labels "ai-grid/machine-network" }}
+                    - ipBlock:
+                        {{- if regexMatch "^((25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])\\.){3}(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])_([1-9]|[12][0-9]|3[0-2])$" . }}
+                        cidr: {{ replace "_" "/" . | quote }}
+                        {{- else }}
+                        cidr: {{ printf "invalid ai-grid/machine-network label %s" . | quote }}
+                        {{- end }}
+                    {{- end }}
         - repoURL: https://github.com/sjug/ai-grid-tenant.git
           targetRevision: main
-          path: apps/rhoai/local-cluster
-          directory:
-            exclude: '{{ if eq (index .metadata.labels "local-cluster") "true" }}{{ else }}*{{ end }}'
-        # MaaS sites (role ingress or combined, the hub included) get the Authorino
-        # trust patch; an inference site runs no MaaS and renders nothing.
-        - repoURL: https://github.com/sjug/ai-grid-tenant.git
-          targetRevision: main
-          path: apps/rhoai/maas-sites
+          path: apps/rhoai/gateway-hostname
           helm:
-            releaseName: maas-sites
-            # Per-site overrides (for example authorino.extraVolumeItems) live in
-            # apps/rhoai/maas-sites/values-<cluster>.yaml; absent files are ignored.
-            ignoreMissingValueFiles: true
+            releaseName: rhoai-gateway-hostname
             valueFiles:
-              - $values/apps/rhoai/maas-sites/values-{{ .name }}.yaml
+              - $values/apps/rhoai/values.yaml
             parameters:
-              - name: enabled
-                value: '{{ if eq (index .metadata.labels "ai-grid/role") "inference" }}false{{ else }}true{{ end }}'
+              - name: clusterNamespace
+                value: '{{ .name }}'
+                forceString: true
+              # An inference-only site has no MaaS Gateway: the chart renders nothing there.
+              - name: role
+                value: '{{ index .metadata.labels "ai-grid/role" }}'
+                forceString: true
         - repoURL: https://github.com/sjug/ai-grid-tenant.git
           targetRevision: main
           path: apps/rhoai/catalog
@@ -119,6 +143,13 @@ spec:
         server: '{{ if eq (index .metadata.labels "local-cluster") "true" }}https://kubernetes.default.svc{{ else }}{{ .server }}{{ end }}'
         namespace: redhat-ai-grid
       ignoreDifferences:
+        - group: gateway.networking.k8s.io
+          kind: Gateway
+          name: maas-default-gateway
+          namespace: openshift-ingress
+          jqPathExpressions:
+            - '.spec.listeners[] | select(.name == "http") | .hostname'
+            - '.spec.listeners[] | select(.name == "https") | .hostname'
         # OpenShift injects a generated dockercfg pull secret into this
         # OLM-owned ServiceAccount. Ignore only that controller-generated entry
         # so Argo still owns the explicit catalog pull secret.
@@ -135,6 +166,16 @@ spec:
           jsonPointers:
             - /data
             - /metadata/annotations
+        # apps/ai-grid-usage-logs delivers spec.monitoring.usageLogs through an
+        # ACM Policy, because the ingest endpoint is the hub's Route host and is
+        # not knowable at render time. Without this, Argo's selfHeal and that
+        # policy fight over one object every cycle. Argo still owns the rest of
+        # spec.monitoring -- metrics, traces and log forwarding.
+        - group: dscinitialization.opendatahub.io
+          kind: DSCInitialization
+          name: default-dsci
+          jsonPointers:
+            - /spec/monitoring/usageLogs
         - group: ""
           kind: Service
           name: grid-provider-gateway

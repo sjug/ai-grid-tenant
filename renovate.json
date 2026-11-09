@@ -1,6 +1,25 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "helm-values": {
-    "managerFilePatterns": ["/(^|/)values\.ya?ml$/", "/(^|/)nightly\.ya?ml$/"]
-  }
+    "managerFilePatterns": ["/(^|/)values\\.ya?ml$/", "/(^|/)nightly\\.ya?ml$/"]
+  },
+  "argocd": {
+    "managerFilePatterns": ["/^apps\\/rhoai\\/hub\\/01-applicationset\\.yaml$/"]
+  },
+  "packageRules": [
+    {
+      "matchManagers": ["argocd"],
+      "matchDatasources": ["git-tags"],
+      "enabled": false
+    },
+    {
+      "matchManagers": ["argocd"],
+      "matchDatasources": ["docker"],
+      "matchPackageNames": ["ghcr.io/opendatahub-io/odh-gitops/rhai-on-openshift-chart"],
+      "versioning": "semver",
+      "rangeStrategy": "pin",
+      "allowedVersions": "/^\\d+\\.\\d+\\.\\d+-dev\\.\\d+(\\.\\d+)?$/",
+      "ignoreUnstable": false
+    }
+  ]
 }

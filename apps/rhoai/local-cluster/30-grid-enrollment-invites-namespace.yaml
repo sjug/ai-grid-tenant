@@ -1,9 +1,0 @@
-# The chart skips creating this when inviteSecrets.namespace names it. Kept out
-# of redhat-* so ROSA permits it. Holds invite tokens, never the Grid CA key.
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: grid-enrollment-invites
-  annotations:
-    argocd.argoproj.io/sync-options: Prune=false,Delete=false
-    argocd.argoproj.io/sync-wave: "-1"

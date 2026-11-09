@@ -23,10 +23,10 @@ spec:
     - requiredClusterSelector:
         labelSelector:
           matchExpressions:
-            - key: name
+            - key: local-cluster
               operator: NotIn
               values:
-                - local-cluster
+                - "true"
             # The external-services cluster runs Redis itself (apps/external-services).
             - key: ai-grid/external-services
               operator: NotIn

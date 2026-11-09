@@ -1,6 +1,3 @@
-{{- if not .Values.cluster_admins }}
-{{- fail "cluster-admins: values must define a non-empty 'cluster_admins' list" }}
-{{- end }}
 {{- range $user := .Values.cluster_admins }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1

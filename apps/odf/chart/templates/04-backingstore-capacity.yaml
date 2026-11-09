@@ -1,0 +1,23 @@
+{{- with .Values.backingStoreCapacity }}
+{{- if .enabled }}
+# SSA partial: preserve the operator's pool type, storage request and storage class.
+apiVersion: noobaa.io/v1alpha1
+kind: BackingStore
+metadata:
+  name: noobaa-default-backing-store
+  namespace: openshift-storage
+  annotations:
+    argocd.argoproj.io/sync-wave: "3"
+    argocd.argoproj.io/sync-options: ServerSideApply=true,Validate=false,DisableClientSideApplyMigration=true,Prune=false,Delete=false
+spec:
+  pvPool:
+    numVolumes: {{ .numVolumes }}
+    resources:
+      requests:
+        cpu: {{ .agentResources.requests.cpu | quote }}
+        memory: {{ .agentResources.requests.memory | quote }}
+      limits:
+        cpu: {{ .agentResources.limits.cpu | quote }}
+        memory: {{ .agentResources.limits.memory | quote }}
+{{- end }}
+{{- end }}

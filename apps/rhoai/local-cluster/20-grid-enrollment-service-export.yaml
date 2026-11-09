@@ -1,8 +1,0 @@
-# Submariner is not part of the enrollment subchart.
-apiVersion: multicluster.x-k8s.io/v1alpha1
-kind: ServiceExport
-metadata:
-  name: grid-enrollment
-  namespace: redhat-ai-grid
-  annotations:
-    argocd.argoproj.io/sync-wave: "2"

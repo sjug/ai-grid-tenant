@@ -1,4 +1,10 @@
-# An ingress spoke runs MaaS, the portal and the grid consumer gateway: the
-# values in apps/rhoai/values.yaml. It serves no models; the grid provider
-# gateway and the models go to inference and combined spokes only.
-{}
+profile: ai-grid-ingress
+
+dependencies:
+  rhcl:
+    config:
+      authorinoTrustedCA:
+        configMaps:
+          - odh-trusted-ca-bundle
+          - openshift-service-ca.crt
+          - home-keycloak-ca

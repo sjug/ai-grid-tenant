@@ -11,16 +11,20 @@ in the reserved `global` ACM cluster set:
   for mirrored operator-bundle pulls, and for every other registry the hub
   Secret holds, such as `registry.stage.redhat.io` for the
   `registry.redhat.io/rhaii*` mirrors that model images pull through.
-- the remote-only Limitador Redis configuration that shares MaaS rate-limit
+- the Limitador Redis configuration, on remote ingress and combined sites only, that shares MaaS rate-limit
   counters through the Submariner service import.
-- the hub-only `rhai-metrics` addon registration and, on enabled grid sites,
-  the NetworkPolicy admitting the local ACM agents to each RHOAI
-  collector's HTTPS exporter on port 8889. The policy retries until RHOAI creates
-  its monitoring namespace. It replaces the hub-only policy in `ai-grid-o11y`;
-  allow for a brief prune/reconcile handoff during the first sync. Do not also
-  deploy an ApplicationSet managing the same NetworkPolicy. Removing the
-  registration policy does not remove the addon's tuple: withdrawal requires a
-  separate migration that preserves the other addon configs.
+- the hub-only addon registration of `rhai-metrics` and of `ai-grid-dashboard-platform-metrics`
+  (the GPU metric the AI Grid dashboards need beyond ACM's default list) and, on enabled grid sites,
+  the NetworkPolicy admitting the local ACM agents to each RHOAI collector's
+  HTTPS exporter on port 8889. It retries until RHOAI creates its monitoring
+  namespace and replaces the hub-only policy in `ai-grid-o11y`; the initial
+  prune/reconcile handoff can briefly interrupt these scrapes. Do not also
+  deploy an ApplicationSet managing that NetworkPolicy. Only the addon's copied
+  scrape pool keeps targets, preventing duplicate collection on the hub.
+  Removing the registration policy does not withdraw its addon tuple; that
+  requires a separate migration preserving the other configs.
+- temporary cert-manager permissions for the OpenTelemetry operator on enabled Grid sites
+  with role `ingress`, `inference` or `combined`, including an enabled hub.
 - the catalog ServiceAccount's `imagePullSecrets` wiring is managed by
   `apps/rhoai/catalog`; OLM does not update an already-created catalog
   ServiceAccount when `CatalogSource.spec.secrets` changes.
@@ -48,10 +52,30 @@ Secret is applied only as `quay.io/rhoai`, so the cluster's own `quay.io` login
 stays. Updating that Secret triggers the normal Machine Config
 Operator rollout to each node.
 
+## OpenTelemetry cert-manager compatibility
+
+The compatibility grant uses `openshift-opentelemetry-operator`, explicitly set in
+`apps/rhoai/values.yaml`. A custom operator namespace requires updating the policy's
+ServiceAccount subject as well. The grant mirrors [RHOAI's supplemental RBAC](https://github.com/opendatahub-io/odh-observability/blob/f7050b59693a1a12da127cbb757d75fa4d125ef5/charts/odh-observability/templates/opentelemetry-cert-manager-rbac.yaml).
+
+OTel caches cert-manager discovery and authorization at startup; Argo sync waves
+do not guarantee these prerequisites are ready first. If OTel started too early,
+confirm policy compliance, cert-manager API availability and operator permissions.
+Replace webhook pods one at a time, maintaining a Ready serving replica and
+waiting for each replacement to be Ready; verify webhook
+endpoints, then replace controller pods one at a time and wait for readiness.
+OLM can revert `rollout restart`.
+Allow RHOAI to retry, then verify collector/allocator readiness, Certificates,
+Monitoring Ready at its current generation, and collector scrape targets.
+
+Retire the workaround only after equivalent product-owned access is verified.
+The policy retains its RBAC on deletion or deselection; explicitly remove the
+compatibility ClusterRoleBinding and ClusterRole through GitOps during retirement.
+
 ## Shared Limitador Redis
 
 `apps/limitador-redis` owns the Redis instance and its local Limitador storage
-configuration on `local-cluster`. On every other managed cluster, the
+configuration on the hub. On every other managed cluster, the
 `rhoai-limitador-redis` Policy creates the `limitador-redis` namespace needed
 for the Submariner `ServiceImport`, the `kuadrant-system/limitador-redis`
 Secret, and the `Limitador/limitador` Redis storage reference. Remote
@@ -62,7 +86,7 @@ redis://limitador-redis-master.limitador-redis.svc.clusterset.local:6379
 ```
 
 The local Redis NetworkPolicy permits Submariner GlobalNet traffic
-(`242.0.0.0/8`). The policy intentionally excludes `local-cluster` so the
+(`242.0.0.0/8`). The policy intentionally excludes the hub so the
 existing local Argo Application remains the sole owner of the Redis and local
 Limitador storage resources.
 
@@ -103,18 +127,3 @@ kubectl --context "$SPOKE_CONTEXT" -n limitador-redis get serviceimport \
 kubectl --context "$SPOKE_CONTEXT" -n kuadrant-system get limitador limitador \
   -o jsonpath='{.spec.storage.redis.configSecretRef.name}{"\n"}'
 ```
-
-## Application metrics
-
-Enabled grid sites collect grid, Authorino, database and Redis metrics through
-RHOAI's collector. Chart-owned monitors carry the scrape label; a policy adds
-only that label to named existing operator monitors without owning their specs.
-Removing the policy leaves those labels in place, so withdrawal must explicitly
-remove the labels as well. Namespace-wide opt-in is not required.
-
-A supplemental gateway monitor excludes the serving gateway's Istio request
-families already collected by RHOAI. Kuadrant's full gateway and Limitador
-monitors remain unlabelled to avoid duplicate collection. Existing gateway
-policies admit the collector; grid metrics and Redis receive explicit access.
-COO supplies RHOAI's MonitoringStack. Hub delivery uses `rhai-metrics` in
-`ai-grid-o11y`.

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Adds the CA that issued the external-services cluster's Keycloak Route certificate to this site's cluster trust, so
-# Authorino (apps/rhoai/maas-sites) can reach the home for OpenID discovery. Run with KUBECONFIG at the site.
+# Authorino (the RHOAI AI Grid profiles) can reach the home for OpenID discovery. Run with KUBECONFIG at the site.
 #
 #   HOME_KUBECONFIG=<home kubeconfig> KEYCLOAK_HOST=<home Keycloak Route host> REALM=<MaaS realm> \
 #     docs/acm/cluster-onboarding/trust-external-services-ca.sh

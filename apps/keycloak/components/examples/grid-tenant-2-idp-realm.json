@@ -1,0 +1,145 @@
+{
+  "realm": "grid-tenant-2-idp",
+  "keycloakVersion": "26.8.0",
+  "accessTokenLifespan": 21600,
+  "ssoSessionIdleTimeout": 21600,
+  "enabled": true,
+  "loginWithEmailAllowed": true,
+  "clients": [
+    {
+      "clientId": "saas-broker",
+      "name": "SaaS broker for Grid Tenant 2",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "clientAuthenticatorType": "client-secret",
+      "secret": "${GRID_TENANT_2_BROKER_CLIENT_SECRET}",
+      "publicClient": false,
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": false,
+      "redirectUris": [
+        "${KEYCLOAK_PUBLIC_URL}/realms/saas/broker/grid-tenant-2/endpoint"
+      ],
+      "attributes": {
+        "post.logout.redirect.uris": "${KEYCLOAK_PUBLIC_URL}/realms/saas/broker/grid-tenant-2/endpoint/logout_response"
+      },
+      "protocolMappers": [
+        {
+          "name": "MaaS tenant groups",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-group-membership-mapper",
+          "config": {
+            "claim.name": "groups",
+            "full.path": "false",
+            "id.token.claim": "true",
+            "userinfo.token.claim": "true",
+            "access.token.claim": "false"
+          }
+        },
+        {
+          "name": "MaaS roles",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-client-role-mapper",
+          "config": {
+            "usermodel.clientRoleMapping.clientId": "saas-broker",
+            "usermodel.clientRoleMapping.rolePrefix": "",
+            "claim.name": "roles",
+            "jsonType.label": "String",
+            "multivalued": "true",
+            "id.token.claim": "true",
+            "userinfo.token.claim": "true",
+            "access.token.claim": "false"
+          }
+        }
+      ]
+    }
+  ],
+  "components": {
+    "org.keycloak.keys.KeyProvider": [
+      {
+        "id": "4a4ac51a-0896-4d94-a5f8-f499a41d1d12",
+        "name": "grid-tenant-2-idp-signing",
+        "providerId": "java-keystore",
+        "subComponents": {},
+        "config": {
+          "kid": ["4a4ac51a-0896-4d94-a5f8-f499a41d1d12"],
+          "priority": ["1000"],
+          "enabled": ["true"],
+          "active": ["true"],
+          "algorithm": ["RS256"],
+          "keyUse": ["SIG"],
+          "keystore": ["/opt/keycloak/data/grid-tenant-2-idp/keystore.jks"],
+          "keystoreType": ["JKS"],
+          "keystorePassword": ["${KEYCLOAK_SIGNING_KEYSTORE_PASSWORD}"],
+          "keyAlias": ["grid-tenant-2-idp-signing"],
+          "keyPassword": ["${KEYCLOAK_SIGNING_KEYSTORE_PASSWORD}"]
+        }
+      }
+    ],
+    "org.keycloak.userprofile.UserProfileProvider": [
+      {
+        "id": "b5919e8a-046d-47e7-8a2c-f30f5ff12002",
+        "providerId": "declarative-user-profile",
+        "subComponents": {},
+        "config": {
+          "config-pieces-count": ["1"],
+          "config-piece-0": ["{\"unmanagedAttributePolicy\":\"ADMIN_EDIT\"}"]
+        }
+      }
+    ]
+  },
+  "roles": {
+    "client": {
+      "saas-broker": [
+        { "name": "admins", "description": "Administers the organization in AI Grid: sent in the roles claim." },
+        { "name": "users", "description": "Uses the organization's models in AI Grid: sent in the roles claim." }
+      ]
+    }
+  },
+  "groups": [
+    { "name": "ai-grid-users" }
+  ],
+  "users": [
+    {
+      "id": "13b11fd1-d8ef-53d3-8070-b759a0f4cf0f",
+      "username": "bob",
+      "email": "bob@grid-tenant-2.test",
+      "emailVerified": true,
+      "enabled": true,
+      "firstName": "Bob",
+      "lastName": "Tenant",
+      "groups": [
+        "/ai-grid-users"
+      ],
+      "clientRoles": {
+        "saas-broker": ["users"]
+      },
+      "credentials": [
+        {
+          "type": "password",
+          "value": "${GRID_TENANT_2_TEST_USER_PASSWORD}",
+          "temporary": false
+        }
+      ]
+    },
+    {
+      "id": "0aad9c9d-8d04-507f-85b0-e4ea4f94c063",
+      "username": "carol",
+      "email": "carol@grid-tenant-2.test",
+      "emailVerified": true,
+      "enabled": true,
+      "firstName": "Carol",
+      "lastName": "Tenant",
+      "clientRoles": {
+        "saas-broker": ["admins"],
+        "realm-management": ["view-users", "query-users", "query-groups", "query-clients", "manage-users"]
+      },
+      "credentials": [
+        {
+          "type": "password",
+          "value": "${GRID_TENANT_2_TEST_USER_PASSWORD}",
+          "temporary": false
+        }
+      ]
+    }
+  ]
+}

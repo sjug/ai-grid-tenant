@@ -17,12 +17,12 @@ spec:
     # The primary on the hub, whatever the hub's labels: it holds every
     # tenant's API keys and subscriptions, so no label edit, Remove or briefly
     # empty Placement decision may delete it. Its Cluster also carries
-    # Delete=false (apps/maas-db/local-cluster/10-primary.yaml).
+    # Delete=false (apps/maas-db/primary/10-primary.yaml).
     - clusters:
         selector:
           matchLabels:
             apps.open-cluster-management.io/acm-cluster: "true"
-            name: local-cluster
+            local-cluster: "true"
     # A read replica on every other site that runs MaaS: role ingress or
     # combined (apps/ai-grid-spokes). The Placement's live decisions,
     # not the Secret's labels alone, as in the rhoai ApplicationSet.
@@ -40,10 +40,10 @@ spec:
                   apps.open-cluster-management.io/acm-cluster: "true"
                   name: '{{ .clusterName }}'
                 matchExpressions:
-                  - key: name
+                  - key: local-cluster
                     operator: NotIn
                     values:
-                      - local-cluster
+                      - "true"
   template:
     metadata:
       name: 'maas-db-{{.name}}'
@@ -53,9 +53,9 @@ spec:
       source:
         repoURL: https://github.com/sjug/ai-grid-tenant.git
         targetRevision: main
-        path: '{{ if eq .name "local-cluster" }}apps/maas-db/local-cluster{{ else }}apps/maas-db/read-clusters{{ end }}'
+        path: '{{ if eq (index .metadata.labels "local-cluster") "true" }}apps/maas-db/primary{{ else }}apps/maas-db/read-clusters{{ end }}'
       destination:
-        server: '{{.server}}'
+        server: '{{ if eq (index .metadata.labels "local-cluster") "true" }}https://kubernetes.default.svc{{ else }}{{ .server }}{{ end }}'
         namespace: maas-db
       syncPolicy:
         automated:

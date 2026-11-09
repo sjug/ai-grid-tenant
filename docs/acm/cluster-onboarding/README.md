@@ -39,12 +39,19 @@ discover it dynamically:
 
    ```bash
    oc label managedcluster <name> ai-grid/machine-network=192.0.2.0_24
+
+   A site without a load-balancer provider also declares an L2 range for
+   MetalLB (see `apps/metallb/README.md`); sites that have one skip this:
+
+   ```bash
+   oc label managedcluster <name> ai-grid/metallb-pool=192.0.2.10-192.0.2.50
    ```
 
    Then add AI projects and models: see [AI project onboarding](../ai-project-onboarding/README.md).
 
 No `ManagedCluster`, join token, kubeconfig, API URL, or cluster name needs to
-be committed to this repository. No values file per site either. The grid
+be committed to this repository. No values file per site either, beyond the
+optional overrides a few apps accept (`apps/rhoai`, `apps/metallb`). The grid
 operator derives the gateways' routing from the models each site publishes, so
 one values file serves every site. A file named values-<cluster>.yaml is read
 as an override when present.
@@ -66,6 +73,20 @@ as an override when present.
   then leaves that namespace alone. A self-managed cluster, hub or spoke, keeps
   the default and the chart creates it. `redhat-ods-operator` is owned by the
   prerequisites policy on every site and is not affected by this label.
+
+- On managed OpenShift (OSD, ROSA), hub or spoke: the namespaces
+  `redhat-ai-grid` and `redhat-ods-operator`, created by a cluster
+  administrator before you set the role. The platform's admission webhook
+  `namespace-validation.managed.openshift.io` refuses `redhat-*` namespaces
+  from the ACM policy, so until they exist the `rhoai-prerequisites` policy
+  reports `rhoai-namespaces` NonCompliant. As that administrator:
+
+  ```bash
+  oc create namespace redhat-ai-grid
+  oc create namespace redhat-ods-operator
+  ```
+
+  The policy then reports Compliant and manages them from there.
 
 - A default StorageClass. RHOAI monitoring claims 20Gi for metrics and 10Gi for
   traces on every site. An ingress or combined site claims 20Gi for its MaaS
@@ -89,26 +110,32 @@ as an override when present.
   not install.
 - No registry setup. Policies deliver the pull Secrets and the image mirror.
 
-Still per site, on the hub:
+## Trusting the MaaS home's ingress CA
 
-- A declared peer file, apps/rhoai/local-cluster/40-declared-peer-<cluster>.yaml,
-  so other sites can route to this site's models. Members do not report their
-  gateway address yet.
-- The provider gateway NetworkPolicy CIDR, for a site outside the lab VPC.
-
-## Trusting the external-services cluster's ingress CA
-
-Authorino on a MaaS site performs OpenID discovery against the external-services cluster's
+Authorino on a MaaS site performs OpenID discovery against the MaaS home's
 Keycloak Route and validates API keys against maas-api over the OpenShift
-service CA. The trust patch in `apps/rhoai/maas-sites` mounts two ConfigMaps
-for that, `odh-trusted-ca-bundle` and `openshift-service-ca.crt`, which must
-exist in the Authorino namespace of every ingress or combined site.
+service CA. The RHOAI chart's `ai-grid-ingress` and `ai-grid-combined` profiles
+mount three ConfigMaps for that: `odh-trusted-ca-bundle`,
+`openshift-service-ca.crt`, and `home-keycloak-ca`.
 
-If the external-services cluster's Keycloak Route presents a certificate that chains to a public
-root, nothing else is needed. Otherwise the CA that issued that certificate
-must be in the site's cluster trust, which RHOAI copies into
-`odh-trusted-ca-bundle`. `trust-external-services-ca.sh` in this directory does that,
-with `KUBECONFIG` pointing at the site:
+When the hub is also the MaaS home, `rhoai-ingress-clusters` reads the hub's
+default ingress certificate (`openshift-config-managed/default-ingress-cert`)
+and creates `home-keycloak-ca` in `kuadrant-system` on every ingress or
+combined site, under the key `home-keycloak-ca.crt`. The role values project
+that ConfigMap directly into Authorino, and the Policy adds it to the Authorino
+CR's volume contract so the operator and Argo CD agree. No site-wide
+`proxy/cluster.spec.trustedCA` mutation is needed. The key is separate from
+`odh-trusted-ca-bundle`'s `ca-bundle.crt` because both ConfigMaps project into
+the same directory: a shared key would replace the system bundle, and a
+Keycloak Route with a publicly signed certificate would then fail OIDC
+discovery. With its own key, Authorino trusts both bundles.
+
+When MaaS's shared state is on a dedicated cluster labelled
+`ai-grid/external-services=true`, the hub cannot read that cluster's
+`router-ca` Secret directly. The Policy therefore creates an empty
+`home-keycloak-ca` placeholder so the Authorino volume contract remains valid,
+and the real home CA must be added to the site's cluster trust. Use
+`trust-external-services-ca.sh` with `KUBECONFIG` pointing at the site:
 
 ```
 HOME_KUBECONFIG=<external-services cluster kubeconfig> KEYCLOAK_HOST=<Keycloak Route host> REALM=<MaaS realm> \
@@ -135,9 +162,11 @@ tenants.
 `tests/trust-external-services-ca-test.sh` exercises it against stub `oc` and `curl`
 binaries with real certificates.
 
-A site that already mounts volumes into Authorino lists them in
-`apps/rhoai/maas-sites/values-<cluster>.yaml` under `authorino.extraVolumeItems`;
-the trust patch owns the CR's volume list and would otherwise replace them.
+The placeholder carries no certificate and does not extend trust. A site that
+needs more CA ConfigMaps lists the complete set in
+`apps/rhoai/values-<cluster>.yaml` under
+`dependencies.rhcl.config.authorinoTrustedCA.configMaps`. The chart patches only
+its named Authorino volume and leaves other Deployment volumes intact.
 
 ## Prerequisites
 
@@ -185,6 +214,12 @@ After reviewing the summary, rerun the command with `--yes`. The script:
    legacy `GitOpsCluster` integration.
 10. Waits for Argo CD's cluster secret to be created.
 
+The script creates no `KlusterletAddonConfig`, so ACM installs no Search
+collector by itself. The hub's `search-collector` policy
+(`apps/acm/manifests/search`) adds it to every managed cluster but the hub
+within a minute of the import, so ACM Search indexes the new cluster. A cluster
+imported with a `KlusterletAddonConfig` keeps whatever that config says.
+
 The script is safe to rerun after a partial import. If the cluster is already
 accepted and joined, it performs no registration changes and returns after
 verifying the joined condition.
@@ -206,9 +241,11 @@ After the script succeeds, check the hub:
 kubectl --context "$HUB_CONTEXT" get managedclusters
 kubectl --context "$HUB_CONTEXT" -n openshift-gitops get placementdecisions
 kubectl --context "$HUB_CONTEXT" -n openshift-gitops get applications
+kubectl --context "$HUB_CONTEXT" -n "$CLUSTER_NAME" get managedclusteraddon search-collector
 ```
 
 The new cluster appears in the acm-models-gitops-cluster placement decision.
+Its `search-collector` add-on reports Available.
 The role placements then generate its applications: rhoai for every role,
 grid-provider-gateway and the sample model for inference and combined, maas-db
 for ingress and combined. Application names carry the cluster name.

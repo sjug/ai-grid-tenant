@@ -26,16 +26,19 @@ spec:
           path: cluster-config/chart
           helm:
             releaseName: cluster-admins
+            # cluster-admins.yaml is per deployment and may be absent.
+            ignoreMissingValueFiles: true
             valueFiles:
               - $values/cluster-config/values.yaml
+              - $values/cluster-config/cluster-admins.yaml
             parameters:
               - name: hubResources.enabled
-                value: '{{ eq .name "local-cluster" | toString }}'
+                value: '{{ eq (index .metadata.labels "local-cluster") "true" | toString }}'
         - repoURL: https://github.com/sjug/ai-grid-tenant.git
           targetRevision: main
           ref: values
       destination:
-        server: '{{ if eq .name "local-cluster" }}https://kubernetes.default.svc{{ else }}{{ .server }}{{ end }}'
+        server: '{{ if eq (index .metadata.labels "local-cluster") "true" }}https://kubernetes.default.svc{{ else }}{{ .server }}{{ end }}'
         namespace: openshift-gitops
       syncPolicy:
         automated:

@@ -1,7 +1,7 @@
 # MaaS shared PostgreSQL database
 
 This app defines the shared PostgreSQL database for `maas-api`. CloudNativePG
-runs a three-instance writable cluster on `local-cluster`, and an ACM-generated
+runs a three-instance writable cluster on the hub, and an ACM-generated
 Argo CD Application defines a one-instance read-only replica for every other
 registered managed cluster.
 
@@ -13,7 +13,7 @@ automated deletion.
 ## Topology
 
 - The writable primary is `maas-db` in the `maas-db` namespace on
-  `local-cluster`.
+  the hub.
 - The `maas-db-rw` Service is exported through Submariner as
   `maas-db-rw.maas-db.svc.clusterset.local`.
 - The primary server certificate includes the Submariner service name so remote
@@ -22,7 +22,7 @@ automated deletion.
   `acm-submariner` ApplicationSet, so new clusters are onboarded automatically.
 - Each remote cluster runs `maas-read`, a CloudNativePG replica cluster using
   `pg_basebackup` and continuous TLS streaming replication.
-- `local-cluster` exposes `maas-read-ro` and `maas-read-r` as ExternalNames to
+- The hub exposes `maas-read-ro` and `maas-read-r` as ExternalNames to
   its local CloudNativePG read-only Service. Every cluster therefore has the
   same read endpoint; `maas-read-r` is the name a remote site's one-instance
   replica cluster can actually serve (its only instance carries `role=primary`,
@@ -37,7 +37,7 @@ maas-read-r.maas-db.svc.cluster.local:5432
   `DB_CONNECTION_URL` for the writable service and
   `DB_READ_CONNECTION_URL` for the local read-only service.
 - CloudNativePG generates the replication client certificate, CA, and
-  application credentials on `local-cluster`. ACM policies copy them to remote
+  application credentials on the hub. ACM policies copy them to remote
   clusters without storing plaintext secrets in Git.
 - New managed clusters are selected automatically through the `global` cluster
   set. Argo CD creates a replica Application for each ACM-registered cluster.
@@ -48,7 +48,7 @@ maas-read-r.maas-db.svc.cluster.local:5432
 `maas-read-ro` switches in two steps, because a maas-api that restarts after
 the Secret changes resolves the new name at once:
 
-1. Deploy the alias (`local-cluster/31-read-service-r.yaml`) and let it
+1. Deploy the alias (`primary/31-read-service-r.yaml`) and let it
    reconcile on every site. Then run the gate against the hub and every ingress
    or combined site; it checks that `maas-read-r` exists, has ready endpoints
    (the hub's through its ExternalName target) and answers an authenticated
@@ -77,7 +77,7 @@ cluster Secrets with the `apps.open-cluster-management.io/acm-cluster: "true"`
 label. After pushing the app, Argo CD syncs `maas-db` automatically. The
 ApplicationSet creates:
 
-- `maas-db-local-cluster` for the writable primary, on the hub whatever its
+- `maas-db-<hub>` for the writable primary, on the hub whatever its
   labels. Every object it delivers (the CloudNativePG operator's Namespace,
   OperatorGroup and Subscription, the `Cluster`, its ServiceExport and read
   Service) carries `argocd.argoproj.io/sync-options: Delete=false`, so deleting
@@ -85,7 +85,7 @@ ApplicationSet creates:
 - One `maas-db-<cluster-name>` Application for each other site that runs
   `maas-api`: role ingress or combined (`apps/ai-grid-spokes`).
 
-The replication-secret policy selects those sites; on `local-cluster`,
+The replication-secret policy selects those sites; on the hub,
 CloudNativePG owns the generated secrets directly. The API-credential policy
 runs on every such site, the hub included, and creates or updates the
 `maas-db-config` Secret expected by `maas-api`.

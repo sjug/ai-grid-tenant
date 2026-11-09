@@ -1,8 +1,12 @@
+{{- if .Values.instance.create }}
 apiVersion: metallb.io/v1beta1
 kind: MetalLB
 metadata:
   name: metallb
-  namespace: metallb-system
+  namespace: {{ .Values.operator.namespace }}
   annotations:
+    # Never pruned: switching operator.install or instance.create off hands the object over, it does not remove it.
+    argocd.argoproj.io/sync-options: Prune=false
     argocd.argoproj.io/sync-wave: "2"
 spec: {}
+{{- end }}

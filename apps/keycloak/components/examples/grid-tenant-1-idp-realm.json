@@ -1,0 +1,128 @@
+{
+  "realm": "grid-tenant-1-idp",
+  "keycloakVersion": "26.8.0",
+  "accessTokenLifespan": 21600,
+  "ssoSessionIdleTimeout": 21600,
+  "enabled": true,
+  "loginWithEmailAllowed": true,
+  "clients": [
+    {
+      "clientId": "saas-broker",
+      "name": "SaaS broker for Grid Tenant 1",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "clientAuthenticatorType": "client-secret",
+      "secret": "${GRID_TENANT_1_BROKER_CLIENT_SECRET}",
+      "publicClient": false,
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": false,
+      "redirectUris": [
+        "${KEYCLOAK_PUBLIC_URL}/realms/saas/broker/grid-tenant-1/endpoint"
+      ],
+      "attributes": {
+        "post.logout.redirect.uris": "${KEYCLOAK_PUBLIC_URL}/realms/saas/broker/grid-tenant-1/endpoint/logout_response"
+      },
+      "protocolMappers": [
+        {
+          "name": "MaaS tenant groups",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-group-membership-mapper",
+          "config": {
+            "claim.name": "groups",
+            "full.path": "false",
+            "id.token.claim": "true",
+            "userinfo.token.claim": "true",
+            "access.token.claim": "false"
+          }
+        },
+        {
+          "name": "MaaS roles",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-client-role-mapper",
+          "config": {
+            "usermodel.clientRoleMapping.clientId": "saas-broker",
+            "usermodel.clientRoleMapping.rolePrefix": "",
+            "claim.name": "roles",
+            "jsonType.label": "String",
+            "multivalued": "true",
+            "id.token.claim": "true",
+            "userinfo.token.claim": "true",
+            "access.token.claim": "false"
+          }
+        }
+      ]
+    }
+  ],
+  "components": {
+    "org.keycloak.keys.KeyProvider": [
+      {
+        "id": "3e4c96cc-b3b4-48d0-bab6-cb67fffc6cfb",
+        "name": "grid-tenant-1-idp-signing",
+        "providerId": "java-keystore",
+        "subComponents": {},
+        "config": {
+          "kid": ["3e4c96cc-b3b4-48d0-bab6-cb67fffc6cfb"],
+          "priority": ["1000"],
+          "enabled": ["true"],
+          "active": ["true"],
+          "algorithm": ["RS256"],
+          "keyUse": ["SIG"],
+          "keystore": ["/opt/keycloak/data/grid-tenant-1-idp/keystore.jks"],
+          "keystoreType": ["JKS"],
+          "keystorePassword": ["${KEYCLOAK_SIGNING_KEYSTORE_PASSWORD}"],
+          "keyAlias": ["grid-tenant-1-idp-signing"],
+          "keyPassword": ["${KEYCLOAK_SIGNING_KEYSTORE_PASSWORD}"]
+        }
+      }
+    ],
+    "org.keycloak.userprofile.UserProfileProvider": [
+      {
+        "id": "b5919e8a-046d-47e7-8a2c-f30f5ff12001",
+        "providerId": "declarative-user-profile",
+        "subComponents": {},
+        "config": {
+          "config-pieces-count": ["1"],
+          "config-piece-0": ["{\"unmanagedAttributePolicy\":\"ADMIN_EDIT\"}"]
+        }
+      }
+    ]
+  },
+  "roles": {
+    "client": {
+      "saas-broker": [
+        { "name": "admins", "description": "Administers the organization in AI Grid: sent in the roles claim." },
+        { "name": "users", "description": "Uses the organization's models in AI Grid: sent in the roles claim." }
+      ]
+    }
+  },
+  "groups": [
+    { "name": "ai-grid-admins" },
+    { "name": "ai-grid-users" }
+  ],
+  "users": [
+    {
+      "id": "e58c353f-daf3-5cec-bb71-7163c2deb1b1",
+      "username": "alice",
+      "email": "alice@grid-tenant-1.test",
+      "emailVerified": true,
+      "enabled": true,
+      "firstName": "Alice",
+      "lastName": "Tenant",
+      "groups": [
+        "/ai-grid-admins",
+        "/ai-grid-users"
+      ],
+      "clientRoles": {
+        "saas-broker": ["admins"],
+        "realm-management": ["view-users", "query-users", "query-groups", "query-clients", "manage-users"]
+      },
+      "credentials": [
+        {
+          "type": "password",
+          "value": "${GRID_TENANT_1_TEST_USER_PASSWORD}",
+          "temporary": false
+        }
+      ]
+    }
+  ]
+}

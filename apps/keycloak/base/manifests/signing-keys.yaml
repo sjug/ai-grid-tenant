@@ -1,0 +1,79 @@
+apiVersion: generators.external-secrets.io/v1alpha1
+kind: Password
+metadata:
+  name: keycloak-signing-keystore-password
+  namespace: maas-db
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+spec:
+  length: 48
+  digits: 8
+  symbols: 0
+  noUpper: false
+  allowRepeat: true
+---
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: keycloak-signing-keystore-password
+  namespace: maas-db
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+spec:
+  refreshPolicy: CreatedOnce
+  refreshInterval: 0s
+  target:
+    name: keycloak-signing-keystore-password
+    creationPolicy: Owner
+    deletionPolicy: Retain
+    template:
+      type: Opaque
+      engineVersion: v2
+      mergePolicy: Merge
+  dataFrom:
+    - sourceRef:
+        generatorRef:
+          apiVersion: generators.external-secrets.io/v1alpha1
+          kind: Password
+          name: keycloak-signing-keystore-password
+      rewrite:
+        - regexp:
+            source: ^password$
+            target: password
+---
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: keycloak-signing-selfsigned
+  namespace: maas-db
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  selfSigned: {}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: keycloak-saas-signing
+  namespace: maas-db
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+spec:
+  secretName: keycloak-saas-signing
+  commonName: keycloak-saas-signing
+  duration: 87600h
+  renewBefore: 720h
+  privateKey:
+    algorithm: RSA
+    size: 2048
+    rotationPolicy: Never
+  keystores:
+    jks:
+      create: true
+      alias: saas-signing
+      passwordSecretRef:
+        name: keycloak-signing-keystore-password
+        key: password
+  issuerRef:
+    name: keycloak-signing-selfsigned
+    kind: Issuer

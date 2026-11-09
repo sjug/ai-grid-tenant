@@ -61,7 +61,7 @@ The working sample is [apps/acm-models/facebook-opt-125m](../../../apps/acm-mode
 
 Nothing else per model. The grid operator derives the gateway's dial from the published InferenceProvider. The dial goes to the serving gateway at the model's publisher path, as the grid model client, so the inference scheduler picks the pod. The serving gateway authorizes that path with a review for post on the model. The rhoai-prerequisites policy grants that verb to the grid model client in every labelled namespace, since the model controller's own Role covers another path (odh-model-controller#996).
 
-Other sites learn of the model through discovery: this site's GridSite, published from its Routes and distributed by the hub's observers, and the provider catalog the grid operator polls over mTLS. No per-site file is needed.
+Other sites reach the model through the site's provider gateway, which the peers policy publishes to them.
 
 ## Verify
 

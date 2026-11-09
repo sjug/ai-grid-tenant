@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Renders the Loki createNamespace parameter (extracted from the ApplicationSet) per label context, then the
-# pinned chart per role and mode, asserting its Namespace objects. RHAI_CHART_DIR skips the clone. Needs helm, git, PyYAML.
+# pinned chart per role and mode, asserting its Namespace objects. RHAI_CHART_DIR skips the OCI pull. Needs helm, git, PyYAML.
 set -euo pipefail
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd); T=$(mktemp -d); trap 'rm -rf "$T"' EXIT; mkdir -p "$T/chart/templates"; fails=0; total=0
 APPSET=$HERE/../hub/01-applicationset.yaml
@@ -9,7 +9,7 @@ d = yaml.safe_load(open(sys.argv[1])); params = {}; chart = None
 for s in d["spec"]["template"]["spec"]["sources"]:
     for p in (s.get("helm") or {}).get("parameters", []):
         if p["name"] in ("operator.rhoai.olm.createNamespace", "dependencies.loki.olm.createNamespace"): params[p["name"]] = p["value"]
-    if s.get("path", "").endswith("rhai-on-openshift-chart"): chart = {"repoURL": s["repoURL"], "targetRevision": s["targetRevision"], "path": s["path"]}
+    if s.get("repoURL", "").startswith("oci://") and s.get("path") == ".": chart = {"repoURL": s["repoURL"], "targetRevision": s["targetRevision"], "path": s["path"]}
 assert len(params) == 2 and chart, (params, chart); json.dump({"params": params, "chart": chart}, open(sys.argv[2], "w"))' "$APPSET" "$T/appset.json"
 python3 -c 'import json,sys; json.dump(json.load(open(sys.argv[1]))["params"], open(sys.argv[2], "w"))' "$T/appset.json" "$T/params.json"
 ok() { total=$((total+1)); printf '   ok   %-52s %s\n' "$1" "${2:-}"; }
@@ -35,14 +35,16 @@ if [ "$rhoai" = '{{ ne (index .metadata.labels "local-cluster") "true" | toStrin
 read -r repo rev path < <(python3 -c 'import json,sys; c=json.load(open(sys.argv[1]))["chart"]; print(c["repoURL"], c["targetRevision"], c["path"])' "$T/appset.json")
 if [ -n "${RHAI_CHART_DIR:-}" ]; then CHART=$RHAI_CHART_DIR
 else
-  git clone -q --depth 1 "$repo" "$T/odh-gitops" && git -C "$T/odh-gitops" fetch -q --depth 1 origin "$rev" && git -C "$T/odh-gitops" checkout -q FETCH_HEAD
-  CHART=$T/odh-gitops/$path
+  helm pull "$repo" --version "$rev" --destination "$T/odh-gitops" --untar
+  CHART=$T/odh-gitops/rhai-on-openshift-chart
 fi
 [ -f "$CHART/Chart.yaml" ] || { echo "chart not found at $CHART" >&2; exit 1; }
 helm dependency build "$CHART" >/dev/null
 render() { # role loki-create rhoai-create -> writes $T/out.json {namespaces: [...], loki_subscription_ns: ...}
   helm template rhai-on-openshift "$CHART" -f "$HERE/../values.yaml" -f "$HERE/../roles/$1.yaml" \
-    --set grid-enrollment.enabled=false --set praxis-gateway.grid.siteName=site \
+    --set praxis-gateway.grid.siteName=site \
+    --set praxis-provider-gateway.grid.siteName=site \
+    --set praxis-provider-gateway.networkPolicy.from[0].podSelector.matchLabels.app=render \
     --set "dependencies.loki.olm.createNamespace=$2" --set "operator.rhoai.olm.createNamespace=$3" \
   | python3 -c 'import sys, yaml, json
 docs = [d for d in yaml.safe_load_all(sys.stdin) if d]

@@ -1,0 +1,127 @@
+# The delivery half of AI Grid MaaS usage logs. apps/ai-grid-o11y owns the hub's
+# LokiStack, its object storage and the ingest identities; this app supplies what
+# that one lacks on a dedicated hub -- the Loki operator that reconciles its
+# LokiStack, and the ACM policy that tells each site where to write and hands it
+# the writer token.
+#
+# Values for charts/rhai-on-openshift-chart/charts/ai-grid-o11y-hub, consumed by
+# the subchart directly rather than through the parent chart. Un-nested for that
+# reason, and `enabled` is set here because the parent would otherwise gate the
+# subchart through `condition:` in its Chart.yaml.
+enabled: true
+
+# false: the store comes from apps/ai-grid-o11y, so this app has nothing to put
+# in ai-grid-o11y and should not create that namespace either.
+createNamespace: false
+
+global:
+  # Argo CD's repo-server renders without cluster access, so the chart's
+  # lookup-based CRD gates always see "absent" there and would drop the store's
+  # CRs entirely. Argo retries the apply until the Loki operator's CRDs exist.
+  skipCrdCheck: true
+
+lokiStack:
+  # false: apps/ai-grid-o11y owns the store. Its manifests/lokistack.yaml is the
+  # single source of truth for the LokiStack's name, size, storage class, schemas,
+  # 30-day retention and the seven promoted stream labels -- none of which are
+  # repeated here, because a second copy would diverge from it silently while
+  # having no effect. Only this toggle is read when the store is someone else's.
+  enabled: false
+ingest:
+  # Both false: apps/ai-grid-o11y owns the store and its ingest identities --
+  # the writer ServiceAccount, its ClusterRole and the binding between them.
+  # The chart could not render them here anyway, because
+  # templates/store/ingest-rbac.yaml is gated on lokiStack.enabled.
+  writer:
+    create: false
+  reader:
+    create: false
+
+spokePolicy:
+  enabled: true
+
+  # Applied last, after the store and its storage-key hook.
+  #
+  # Argo CD has a health check for ACM Policy that maps NonCompliant to
+  # Degraded, and this policy is legitimately NonCompliant until RHOAI exists on
+  # the spoke to receive the credential. In wave 0 that failed the sync on every
+  # cycle, which starved the wave-1 hook that creates the store's object-storage
+  # Secret. In the last wave it cannot block anything that matters.
+  #
+  # Helm merges maps, so the chart's own standards annotation is kept.
+  annotations:
+    argocd.argoproj.io/sync-wave: "5"
+
+  # Deliver both the token and the collector configuration.
+  #
+  # Argo CD also renders each site's DSCInitialization from apps/rhoai, so this
+  # policy and Argo's selfHeal are two writers on one object. The policy patches
+  # only spec.monitoring.usageLogs with complianceType musthave, which merges
+  # rather than replaces, and apps/rhoai/hub/01-applicationset.yaml ignores that
+  # subtree so Argo does not revert it. Argo keeps the rest of spec.monitoring.
+  deliverCredential: true
+  deliverConfiguration: true
+
+  # The ingest endpoint is the hub's own Route host, which differs per fleet, so
+  # it cannot be a literal in Git. `helm lookup` cannot supply it either: the
+  # Argo CD repo-server renders without cluster access. ACM resolves this hub
+  # template on the hub at propagation time instead.
+  #
+  # The Route belongs to apps/ai-grid-o11y's LokiStack, in redhat-ods-monitoring,
+# and the Loki Operator creates it from the LokiStack -- so it exists without
+# this app rendering it.
+#
+# The Route belongs to apps/ai-grid-o11y's LokiStack, in redhat-ods-monitoring,
+  # and the Loki Operator creates it from that LokiStack -- so it exists without
+  # this app rendering a store.
+  #
+  # The `lookup` reads beyond the propagator's default scope, so it needs
+  # hubTemplateOptions below and the RBAC in manifests/20-hub-template-rbac.yaml.
+  endpoint: '{{hub printf "https://%s/api/logs/v1/infrastructure/otlp" (index (lookup "route.openshift.io/v1" "Route" "redhat-ods-monitoring" "usage-logs").status.ingress 0).host hub}}'
+
+  # Named ServiceAccount the hub templates above resolve as. Created, with its
+  # two narrowly scoped Roles, in manifests/20-hub-template-rbac.yaml.
+  hubTemplateOptions:
+    serviceAccountName: usage-logs-templating
+
+  # The read credential: the same policy hands a spoke-side consumer — anything in
+  # redhat-ai-gateway-infra that queries the hub's store — the query endpoint and a
+  # read-only token. Same policy, so same Placement: a site gets both halves, and
+  # the consumer's namespace arrives with the spoke's own RHOAI install, so the
+  # policy is NonCompliant there until that install runs — the same wait the
+  # DSCInitialization patch has, and harmless for the same reason.
+  readCredential:
+    enabled: true
+
+    # Minted into this hub Secret by the reader-token provisioning Job
+    # (manifests/32-job-provision-usage-logs-reader-token.yaml), for the reader
+    # identity apps/ai-grid-o11y owns. The templating ServiceAccount reads it
+    # through the pinned resourceNames in manifests/20-hub-template-rbac.yaml.
+    credentialSecretName: usage-logs-hub-read-credential
+
+    # Defaults kept: usage-logs-loki in redhat-ai-gateway-infra on each spoke,
+    # with LOKI_READ_ENDPOINT and LOKI_READ_TOKEN as its keys.
+
+  # apps/ai-grid-policies already owns this namespace. Creating it here as well
+  # makes two Argo Applications claim one object, which Argo reports as a
+  # SharedResourceWarning and leaves both of them OutOfSync.
+  createNamespace: false
+
+  placement:
+    # This fleet binds `global`, not the chart's `default`.
+    clusterSet: global
+    # Same reason as createNamespace above: apps/ai-grid-policies already binds
+    # global into this namespace.
+    createClusterSetBinding: false
+    # Left at the chart default, ai-grid.redhat.com/maas=true: a site forwards
+    # usage logs only once labelled, which is deliberately separate from
+    # ai-grid/role. Overriding matchLabels here would ADD to the default rather
+    # than replace it, and the Placement would then match nothing.
+    excludeLocalCluster: true
+    matchLabels:
+      ai-grid.redhat.com/maas: null
+      ai-grid/role: combined
+
+  spoke:
+    monitoringNamespace: redhat-ods-monitoring
+    credentialSecretName: hub-usage-logs-auth

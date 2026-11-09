@@ -1,10 +1,8 @@
-# The serving gateway's full Envoy statistics (the EPP's ext_proc, downstream and upstream counters,
-# memory) on inference-only sites. Kuadrant's istio-pod-monitor provides them where MaaS runs (ingress and
-# combined sites); an inference site has only RHOAI's openshift-ai-inference-metrics PodMonitor, which keeps
-# the Istio request families alone, so its gateway's Envoy filter statistics were never scraped. This
-# PodMonitor goes to inference sites only (no overlap with Kuadrant's) and uses its own name; it is the single
-# full source there, like Kuadrant's on MaaS sites, and the ACM platform job drops RHOAI's duplicate copies of
-# the Istio request families centrally.
+# Retire the campaign's inference-only monitors. They filled a gap: an inference site had no Kuadrant
+# observability, so its serving gateway's full Envoy statistics and its Authorino were never scraped. The
+# chart's inference profile enables Kuadrant observability now, so Kuadrant's istio-pod-monitor and
+# kuadrant-authorino-monitor cover both on every site, and keeping these would scrape each source twice.
+# mustnothave removes the live objects; drop this file once every inference site reports Compliant.
 apiVersion: cluster.open-cluster-management.io/v1beta1
 kind: Placement
 metadata:
@@ -24,6 +22,11 @@ spec:
             - key: ai-grid/role
               operator: In
               values: [inference]
+  tolerations:
+    - key: cluster.open-cluster-management.io/unreachable
+      operator: Exists
+    - key: cluster.open-cluster-management.io/unavailable
+      operator: Exists
 ---
 apiVersion: policy.open-cluster-management.io/v1
 kind: Policy
@@ -45,55 +48,13 @@ spec:
           remediationAction: enforce
           severity: medium
           object-templates:
-            # mustonlyhave: this object is entirely ours, and a field dropped from the template (such as a
-            # metricRelabelings rule) must leave the live object too, which musthave would never do.
-            - complianceType: mustonlyhave
+            - complianceType: mustnothave
               objectDefinition:
                 apiVersion: monitoring.coreos.com/v1
                 kind: PodMonitor
                 metadata:
                   name: ai-grid-gateway-envoy-stats
                   namespace: openshift-ingress
-                  labels:
-                    app.kubernetes.io/part-of: ai-grid
-                spec:
-                  # Gateway pods only (the gateway controller labels them); nothing opted out.
-                  selector:
-                    matchExpressions:
-                      - key: gateway.networking.k8s.io/gateway-name
-                        operator: Exists
-                      - key: istio-prometheus-ignore
-                        operator: DoesNotExist
-                  podMetricsEndpoints:
-                    - interval: 30s
-                      path: /stats/prometheus
-                      relabelings:
-                        - action: keep
-                          sourceLabels: [__meta_kubernetes_pod_container_name]
-                          regex: istio-proxy
-                        - action: keep
-                          sourceLabels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape]
-                          regex: 'true'
-                        # Scrape the merged metrics port named in the pod's prometheus.io/port annotation.
-                        - action: replace
-                          sourceLabels: [__meta_kubernetes_pod_annotation_prometheus_io_port, __meta_kubernetes_pod_ip]
-                          regex: '(\d+);(([A-Fa-f0-9]{1,4}::?){1,7}[A-Fa-f0-9]{1,4})'
-                          replacement: '[$2]:$1'
-                          targetLabel: __address__
-                        - action: replace
-                          sourceLabels: [__meta_kubernetes_pod_annotation_prometheus_io_port, __meta_kubernetes_pod_ip]
-                          regex: '(\d+);((([0-9]+?)(\.|$)){4})'
-                          replacement: '$2:$1'
-                          targetLabel: __address__
-                        - action: replace
-                          sourceLabels: [__meta_kubernetes_pod_label_gateway_networking_k8s_io_gateway_name]
-                          targetLabel: gateway_name
-                        - action: replace
-                          sourceLabels: [__meta_kubernetes_namespace]
-                          targetLabel: namespace
-                        - action: replace
-                          sourceLabels: [__meta_kubernetes_pod_name]
-                          targetLabel: pod
     - objectDefinition:
         apiVersion: policy.open-cluster-management.io/v1
         kind: ConfigurationPolicy
@@ -103,32 +64,13 @@ spec:
           remediationAction: enforce
           severity: medium
           object-templates:
-            # Authorino performs the token review on every provider hop into the serving gateway; Kuadrant's
-            # own kuadrant-authorino-monitor exists only where MaaS runs. Same selector and endpoints as that
-            # object, under a name of its own, on inference-only sites.
-            - complianceType: musthave
+            - complianceType: mustnothave
               objectDefinition:
                 apiVersion: monitoring.coreos.com/v1
                 kind: ServiceMonitor
                 metadata:
                   name: ai-grid-authorino-metrics
                   namespace: kuadrant-system
-                  labels:
-                    app.kubernetes.io/part-of: ai-grid
-                    monitoring.opendatahub.io/scrape: "true"
-                spec:
-                  selector:
-                    matchLabels:
-                      app.kubernetes.io/component: metrics
-                      app.kubernetes.io/part-of: authorino
-                      control-plane: controller-manager
-                  endpoints:
-                    - port: http
-                      path: /metrics
-                      scheme: http
-                    - port: http
-                      path: /server-metrics
-                      scheme: http
 ---
 apiVersion: policy.open-cluster-management.io/v1
 kind: PlacementBinding

@@ -8,7 +8,9 @@ spec:
   source:
     repoURL: https://github.com/sjug/ai-grid-tenant.git
     targetRevision: main
-    path: apps/odf/manifests
+    path: apps/odf/chart
+    helm:
+      releaseName: odf
   destination:
     server: https://kubernetes.default.svc
     namespace: openshift-storage

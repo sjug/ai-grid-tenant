@@ -1,18 +1,1 @@
-# An inference spoke serves models and the grid provider gateway: KServe and the
-# grid operator, no MaaS, no portal and no grid consumer gateway.
-profile: rhaii
-components:
-  aigateway:
-    dsc:
-      # The grid operator (aiGrid, apps/rhoai/values.yaml) comes with AI Gateway.
-      managementState: Managed
-      modelsAsAService:
-        managementState: Removed
-  dashboard:
-    dsc:
-      standard:
-        managementState: Removed
-      maasPortal:
-        managementState: Removed
-praxis-gateway:
-  enabled: false
+profile: ai-grid-inference

@@ -1,0 +1,13 @@
+apiVersion: operators.coreos.com/v1alpha1
+kind: Subscription
+metadata:
+  name: odf-operator-subscription
+  namespace: openshift-storage
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  source: redhat-operators
+  sourceNamespace: openshift-marketplace
+  name: odf-operator
+  channel: stable-{{ .Values.openshift.version }}
+  installPlanApproval: Automatic

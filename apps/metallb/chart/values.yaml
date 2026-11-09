@@ -1,8 +1,15 @@
-# -- Address range for the site's L2 pool, e.g. 198.18.1.10-198.18.1.50. Set per
-# cluster by the metallb ApplicationSet from the ai-grid/metallb-pool label.
-pool:
-  range: ""
-  name: ai-grid
+# -- The site's L2 address range (IPv4 "first-last"), set by the metallb ApplicationSet from the
+# ai-grid/metallb-pool label. Required unless pools is given.
+range: ""
+# -- Pools in full for a site that needs more than one range: name, addresses (ranges or CIDRs),
+# l2 (default true: an L2Advertisement per pool), autoAssign (default true). Replaces range.
+pools: []
 operator:
+  # -- false on a site that already runs the MetalLB operator (nothing of the operator is managed).
+  install: true
   channel: stable
   source: redhat-operators
+  namespace: metallb-system
+instance:
+  # -- false on a site that already has a MetalLB resource.
+  create: true

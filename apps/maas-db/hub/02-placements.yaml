@@ -39,7 +39,7 @@ spec:
             - key: ai-grid/role
               operator: In
               values: [ingress, combined]
-            - key: name
+            - key: local-cluster
               operator: NotIn
               values:
-                - local-cluster
+                - "true"

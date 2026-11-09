@@ -1,0 +1,14 @@
+# The realm sync Jobs are Argo CD PostSync hooks. kubectl apply would start
+# them alongside the Keycloak rollout, in no order, and couldn't update them
+# on a later run (a Job's pod template is immutable).
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: keycloak-realm-sync-bootstrap
+$patch: delete
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: keycloak-saas-realm-sync
+$patch: delete

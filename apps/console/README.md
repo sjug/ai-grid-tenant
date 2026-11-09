@@ -11,17 +11,27 @@ on the hub, installed from its Helm chart: one pod with kube-auth-proxy
   `manifests/ai-grid-ready-reader.yaml` lets the backend read. Add to AI Grid
   and Remove set the `ai-grid/*` and `location` labels; the chart's
   ValidatingAdmissionPolicy stops the backend from changing anything else on a
-  ManagedCluster. In this repository nothing reads those labels yet, so Add and
-  Remove install and uninstall nothing.
+  ManagedCluster. `apps/ai-grid-spokes` selects sites by `ai-grid/enabled` and
+  `ai-grid/role`, so Add with a role installs OpenShift AI in that role (MaaS
+  on ingress and combined sites, models and the provider gateway on inference
+  and combined sites) and joins the grid. Remove takes the cluster out of
+  those Placements: its workloads stay installed, but the catalog's MaaS
+  objects and subscriptions on it are deleted, because they grant tenants
+  access.
 - **Organizations:** Keycloak Organizations in realm `saas`, through a
   Keycloak user of its own with only the realm-management roles that needs
-  (`view-users`, `query-users`, `view-realm`, `manage-realm`).
+  (`view-users`, `query-users`, `view-realm`, `manage-realm`,
+  `view-identity-providers`, `manage-identity-providers`; the last two link a
+  tenant's own IdP to its organization). `manage-identity-providers` is
+  realm-wide: the backend can edit any IdP in realm `saas`, not only those
+  linked to its organizations. Existing hubs: rerun
+  `apps/console/create-secrets.sh`; no restart needed.
 - **GPUs:** each spoke's GPUs from ACM Search. `manifests/search-rbac.yaml`
   binds the backend to ACM's `global-search-user`, which lets it read every
   managed cluster's indexed resources: more than the GPU nodes it asks for, so
   the backend stays behind the console's sign-in (the file says why).
 - **Models and subscriptions:** commits to the catalog repository,
-  [ai-grid-cloud/ai-grid-1-catalog](https://github.com/ai-grid-cloud/ai-grid-1-catalog),
+  [sjug/ai-grid-catalog](https://github.com/sjug/ai-grid-catalog),
   which `apps/acm-models` delivers and `apps/ai-grid-policies` reports on.
   That URL is the one value another environment changes, here
   (`backend.git.url`) and in `apps/acm-models/hub/catalog-*`.
@@ -60,12 +70,23 @@ creates or updates, keeping existing values:
   signs in with a username and password today.
 - `ai-grid-backend-git`: the catalog token, mounted into the backend as a file.
 
-On a cluster whose ingress certificate is not publicly trusted (a self-managed
-bare metal cluster, unlike the lab's OSD), run the script with `CURL_CA_BUNDLE`
-pointing at the cluster's ingress CA, and set `KEYCLOAK_BACKEND_URL` to
-Keycloak's in-cluster Service, `http://keycloak.maas-db.svc:8080`, so the
-backend's admin API calls need no TLS trust. Keycloak's issued URLs stay public
-because its hostname is fixed by `KC_HOSTNAME`.
+The backend reaches Keycloak at the URL the script stores in
+`ai-grid-backend-keycloak`: by default Keycloak's public HTTPS Route, which
+works as is when the cluster's ingress certificate chains to a CA the backend's
+image trusts. On a cluster whose ingress CA is private (most self-managed
+clusters), two things need the CA:
+
+- The script's own calls go through the Route: run it with `CURL_CA_BUNDLE`
+  pointing at a file holding the ingress CA.
+- The backend's calls go to the stored URL, and the backend's image trusts the
+  system roots only: the console chart at the pinned revision has no setting
+  that adds a CA to the backend. Either serve the ingress with a certificate
+  the backend trusts, or set `KEYCLOAK_BACKEND_URL` to Keycloak's in-cluster
+  Service, `http://keycloak.maas-db.svc:8080`, so that the backend's admin API
+  calls stay inside the cluster network and need no TLS trust. Keycloak's
+  issued URLs stay public either way because its hostname is fixed by
+  `KC_HOSTNAME`. Changing the URL means rerunning the script, which restarts
+  the console.
 
 Then it restarts the console. Sign in with an OpenShift login that may patch
 ManagedClusters.
@@ -77,10 +98,9 @@ on every cluster, within the limits `apps/acm-models` sets. Never give that
 token access to this repository: Argo CD applies this repository with
 cluster-admin rights.
 
-## Known limitation: Keycloak recreates realm saas on every start
+## Keycloak restart behavior
 
-`apps/keycloak` runs `kc.sh import --override true` on each start, so realm
-`saas` is rebuilt from its import file. The backend's Keycloak user and any
-organization made in the console are lost whenever Keycloak restarts. Rerun
-`create-secrets.sh` after a restart to recreate the backend's user (it keeps
-its other Secrets). Organizations made in the console have to be made again.
+`apps/keycloak` imports realm `saas` only when it does not exist. The
+backend's Keycloak user and organizations made in the console survive a
+Keycloak restart; Git edits to the realm file reach it through PostSync hooks
+([apps/keycloak/README.md](../keycloak/README.md#realm-imports-and-git-edits)).

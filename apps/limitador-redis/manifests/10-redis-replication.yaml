@@ -56,6 +56,7 @@ spec:
     resources:
       requests:
         cpu: "1"
+        # Kept at the campaign's reservation; upstream requests 512Mi.
         memory: 2Gi
       limits:
         cpu: "4"

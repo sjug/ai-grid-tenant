@@ -129,55 +129,6 @@ spec:
             return hs
           end
         end
-        if obj.status.phase == "Not Ready" then
-          -- Inference-only site (MaaS Removed): RHOAI 3.6 builds report AIGatewayReady=False
-          -- "0/0 deployments ready" and the DSC never reaches Ready although serving works
-          -- (fixed release unknown). Healthy only for exactly that shape; a build reporting
-          -- AIGatewayReady=True no longer matches. The sandbox has no string library: equality tests only.
-          local maas = obj.spec and obj.spec.components and obj.spec.components.aigateway
-            and obj.spec.components.aigateway.modelsAsAService
-            and obj.spec.components.aigateway.modelsAsAService.managementState
-          -- This fork's pinned 3.6 nightly writes status.observedGeneration only after a Ready
-          -- reconcile, which this shape never reaches: absent passes, a stale value still fails.
-          local currentGeneration = obj.status.observedGeneration == nil
-            or (obj.metadata.generation ~= nil and obj.status.observedGeneration == obj.metadata.generation)
-          if maas == "Removed" and currentGeneration then
-            local function has(t, status, message)
-              for _, c in ipairs(obj.status.conditions) do
-                if c.type == t then
-                  return c.status == status and (message == nil or c.message == message)
-                end
-              end
-              return false
-            end
-            -- This fork's pinned nightly emits no Progressing or Degraded condition on the DSC;
-            -- when present they must be False (checked in the loop below).
-            local shape = has("KserveReady", "True") and has("AIGridReady", "True")
-              and has("ProvisioningSucceeded", "True") and has("ComponentsReady", "True")
-              and has("AIGatewayReady", "False", "0/0 deployments ready")
-              and has("Ready", "False", "Some modules are not ready: aigateway")
-              and has("ModulesReady", "False", "Some modules are not ready: aigateway")
-            if shape then
-              for _, c in ipairs(obj.status.conditions) do
-                if (c.type == "Progressing" or c.type == "Degraded") and c.status ~= "False" then shape = false end
-                if c.status ~= "True" and c.type ~= "AIGatewayReady" and c.type ~= "Ready"
-                  and c.type ~= "ModulesReady" and c.type ~= "Progressing" and c.type ~= "Degraded"
-                  and not (c.status == "False" and c.reason == "Removed") then
-                  -- the only optional-feature preconditions a serving site may fail
-                  local optional = c.status == "False" and c.reason == "PreConditionFailed"
-                    and (c.type == "KserveConfidentialContainerDependencies"
-                      or c.type == "KserveLLMInferenceServiceWideEPDependencies")
-                  if not optional then shape = false end
-                end
-              end
-            end
-            if shape then
-              hs.status = "Healthy"
-              hs.message = "DataScienceCluster serves (AI Gateway module idle: no MaaS on this site)"
-              return hs
-            end
-          end
-        end
         if obj.status.phase == "Progressing" or obj.status.phase == "Not Ready" then
           hs.status = "Progressing"
           hs.message = "DataScienceCluster phase: " .. obj.status.phase

@@ -3,6 +3,7 @@ kind: MaaSSubscription
 metadata:
   annotations:
     argocd.argoproj.io/sync-wave: "4"
+    maas.opendatahub.io/retain-api-keys-on-delete: "true"
     openshift.io/display-name: tenant-42c3e46f-2477-44d7-a85b-d3b43f6b31fa-users
   name: tenant-42c3e46f-2477-44d7-a85b-d3b43f6b31fa-users
   namespace: models-as-a-service

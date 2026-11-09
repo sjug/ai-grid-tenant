@@ -3,18 +3,26 @@ kind: ApplicationSet
 metadata:
   name: apps
   namespace: openshift-gitops
+  annotations:
+    argocd.argoproj.io/sync-options: Prune=false,Delete=false
 spec:
   goTemplate: true
   goTemplateOptions: ["missingkey=error"]
   syncPolicy:
     applicationsSync: sync
-    preserveResourcesOnDeletion: false
+    # Keep deployed resources when the root or a generated Application is removed.
+    preserveResourcesOnDeletion: true
   generators:
     - git:
         repoURL: https://github.com/sjug/ai-grid-tenant.git
         revision: main
         files:
           - path: apps/*/application.yaml
+          # The usage-log store belongs to the dedicated-hub profile. A standard hub
+          # already runs apps/ai-grid-o11y, so generating this app here would stand
+          # up a second LokiStack and a second object bucket beside it.
+          - path: apps/ai-grid-usage-logs/application.yaml
+            exclude: true
           # Only the dedicated-hub profile installs cert-manager, registers clusters and runs MaaS on a site.
           - path: apps/cert-manager/application.yaml
             exclude: true

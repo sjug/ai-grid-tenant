@@ -33,6 +33,8 @@ oc apply -f bootstrap/dedicated-hub/applicationset.yaml   # dedicated hub
 
 Every Application it generates syncs from Git on its own.
 
+Both roots set `preserveResourcesOnDeletion: true`: deleting a root, or removing an app from its generator, removes the Application but leaves its deployed resources running, so clean those up separately. An explicit cascading delete from the Argo UI or API can still delete an Application's unprotected resources.
+
 ## Installing ACM
 
 Delivered by the acm Argo app ([apps/acm/manifests](../../../apps/acm/manifests), ACM 2.17.3), in namespace open-cluster-management:
@@ -40,8 +42,9 @@ Delivered by the acm Argo app ([apps/acm/manifests](../../../apps/acm/manifests)
 1. OperatorGroup targeting open-cluster-management.
 2. Subscription advanced-cluster-management, channel release-2.17, source redhat-operators.
 3. MultiClusterHub with an empty spec. The hub registers itself as local-cluster.
-4. A ManagedClusterSetBinding for global, a Placement over global, and ClusterManagementAddOns governance-policy-framework and config-policy-controller installed through that Placement. Every cluster then runs policies, the hub included.
-5. Import each spoke. It joins the global set. See [cluster onboarding](../cluster-onboarding/README.md):
+4. A ManagedClusterSetBinding for global, a Placement over global, and ClusterManagementAddOns governance-policy-framework, config-policy-controller, and governance-standalone-hub-templating installed through that Placement. Every cluster then runs policies and can resolve hub templates, the hub included.
+5. The search-collector Policy ([apps/acm/manifests/search](../../../apps/acm/manifests/search)), placed on the hub only. It creates ACM Search's `search-collector` ManagedClusterAddOn in the namespace of every managed cluster but the hub, so Search indexes the spokes; the provider console reads their GPUs and MaaSSubscriptions through it. The hub runs its own collector. ACM's own ClusterManagementAddOn stays as the MultiClusterHub operator applies it (installStrategy Manual, which that operator restores on every reconcile), and a cluster with a KlusterletAddonConfig is left to it. Deleting the Policy removes the add-ons it created.
+6. Import each spoke. It joins the global set. See [cluster onboarding](../cluster-onboarding/README.md):
 
 ```bash
 docs/acm/cluster-onboarding/import-managed-cluster.sh --spoke-context <spoke> --cluster-name <name>
@@ -101,11 +104,15 @@ A dedicated hub runs ACM, cert-manager and grid-enrollment, and no Grid or RHOAI
 BOOTSTRAP_PROFILE=dedicated-hub ./bootstrap.sh
 ```
 
-Its root ApplicationSet, [bootstrap/dedicated-hub/applicationset.yaml](../../../bootstrap/dedicated-hub/applicationset.yaml), syncs acm, acm-models, ai-grid-policies, ai-grid-spokes, argo-registration, cert-manager, external-secrets, gitops-config, grid-bootstrap, keycloak, limitador-redis, maas-db, external-services, rhoai and rhoai-prerequisites. ACM gets [core](../../../apps/acm/manifests/core) and Submariner, since sites reach the hub's MaaS services over it. Observability stays out because it needs object storage. The default ApplicationSet skips [apps/cert-manager](../../../apps/cert-manager), because on a combined hub the RHOAI app installs cert-manager.
+Its root ApplicationSet, [bootstrap/dedicated-hub/applicationset.yaml](../../../bootstrap/dedicated-hub/applicationset.yaml), syncs acm, acm-models, ai-grid-o11y, ai-grid-policies, ai-grid-spokes, argo-registration, cert-manager, console, external-secrets, gitops-config, grid-bootstrap, keycloak, limitador-redis, maas-db, external-services, metallb, odf, rhoai and rhoai-prerequisites. ACM syncs the full [apps/acm/manifests](../../../apps/acm/manifests) — core, observability, search and Submariner — with [apps/odf](../../../apps/odf) supplying the object storage observability needs. The default ApplicationSet skips [apps/cert-manager](../../../apps/cert-manager), because on a combined hub the RHOAI app installs cert-manager.
 
-[apps/argo-registration](../../../apps/argo-registration) registers every cluster in global with Argo CD, which on a combined hub acm-models does, so the default ApplicationSet skips it. The rhoai app installs RHOAI, and a provider gateway where apps/rhoai/provider-gateway-<cluster>.yaml exists, on each AI Grid site, as [apps/ai-grid-spokes](../../../apps/ai-grid-spokes) selects them by label and role.
+The root generates all Applications except ODF directly from Git, so ACM and argo-registration can start on a fresh hub without an existing Argo cluster registration. ODF is generated separately once the local-cluster registration carries the openshiftVersion-major-minor label; its operator channel then matches that version. Until registration and the version label are available, ODF is absent and ACM observability may wait for its object storage. Verify that acm and argo-registration exist immediately, then check registration and the version label if odf does not appear. An ApplicationSet success condition alone does not confirm that the expected Applications were generated.
 
-acm-models brings only the sample model and its MaaS objects, to AI Grid sites by role. Its GitOpsCluster would duplicate argo-registration, and the console catalog belongs to a combined hub.
+ODF installs into openshift-storage, which OLM allows only one OperatorGroup. The ODF app creates that group and never prunes it. On a hub that already has one there, for example from an LVMS install, label the local-cluster ManagedCluster ai-grid/odf-operatorgroup=existing so ODF uses it instead.
+
+[apps/argo-registration](../../../apps/argo-registration) registers every cluster in global with Argo CD, which on a combined hub acm-models does, so the default ApplicationSet skips it. The rhoai app installs RHOAI and the role's Grid gateways on each AI Grid site, as [apps/ai-grid-spokes](../../../apps/ai-grid-spokes) selects them by label and role.
+
+acm-models brings the sample model and its MaaS objects, to AI Grid sites by role, and the provider console's catalog: its AppProjects and ApplicationSets, which deliver the models and subscriptions the console commits (see [Provider console](#provider-console)). Its GitOpsCluster would duplicate argo-registration, so it stays out.
 
 The hub runs MaaS's shared state: the maas-db primary, Keycloak and Limitador's Redis. Sites reach them over Submariner, and ingress and combined sites get a maas-db read replica. To hold that state on one site instead, label it ai-grid/external-services=true, and [apps/external-services](../../../apps/external-services) installs them there. Do not use both. The default ApplicationSet skips external-services, because a combined hub runs them itself.
 
@@ -113,7 +120,38 @@ The profile sets two grid-bootstrap values for a new grid on its own hub: extern
 
 rhoai-prerequisites delivers the quay.io/rhoai mirror and pull Secret to every cluster in global, the hub included. The grid-enrollment image needs them, so set RHOAI_QUAY_PULL_SECRET before bootstrap.sh, as for any hub. Without it, grid-bootstrap's CA Job stays in ImagePullBackOff. Applying the mirror reboots each node once, so a single-node hub drops out for a few minutes. To avoid the mirror, pin the grid-enrollment image to the public ODH build in the grid-bootstrap values.
 
-Verify: the fifteen Applications Synced and Healthy, the MultiClusterHub Running, and local-cluster joined and available. Do not label local-cluster with ai-grid/enabled; that label alone would make the hub a site.
+A hub with no load balancer labels local-cluster ai-grid/metallb-pool=<first>-<last> with a free range, so its Submariner gateways get an address.
+
+Verify: an Application for each app in that list, plus dedicated-hub-root and the ones acm-models and the site ApplicationSets generate, Synced and Healthy (console only after [its Secrets](#provider-console) exist), the MultiClusterHub Running, and local-cluster joined and available. Do not label local-cluster with ai-grid/enabled; that label alone would make the hub a site.
+
+## Provider console
+
+The console app installs the cloud provider's admin console on the hub, on both hub profiles ([apps/console](../../../apps/console/README.md)). Argo CD creates its namespace, Route and Deployment, but the pod doesn't start until three Secrets exist, and nobody can sign in until its OAuthClient exists. None of them is in git. Create them once per hub:
+
+1. Create the catalog token. Someone with write access to the catalog repository (`backend.git.url` in [apps/console/application.yaml](../../../apps/console/application.yaml), the same URL as in `apps/acm-models/hub/catalog-*`) creates a fine-grained GitHub personal access token: resource owner the repository's organization, repository access only that repository, and repository permission `Contents: Read and write`, nothing else. If the organization requires approval for fine-grained tokens, an organization owner approves it.
+2. Save the token in a file outside any git checkout, readable only by you (`chmod 600`). The console commits to the catalog with it, so anyone holding it can change models and subscriptions on every cluster. Never give it access to this repository.
+3. Wait until Argo CD has created the console's Route:
+
+   ```bash
+   oc -n ai-grid-provider-console get route ai-grid-provider-console
+   ```
+
+4. As a hub cluster-admin, from a checkout of this repository, run:
+
+   ```bash
+   AI_GRID_GIT_TOKEN_FILE=/path/to/token-file apps/console/create-secrets.sh
+   ```
+
+   If the hub's ingress certificate isn't signed by a public CA, also set `CURL_CA_BUNDLE` to a file holding the ingress CA, and `KEYCLOAK_BACKEND_URL=http://keycloak.maas-db.svc:8080` so the backend reaches Keycloak inside the cluster ([apps/console/README.md](../../../apps/console/README.md#before-the-first-sync-completes) says why). `HUB_CONTEXT` picks a kubeconfig context other than the current one. The script is safe to rerun and prints no secret value.
+
+   The script reads Keycloak's Route and `maas-db/keycloak-secrets` through the same context as the console, so it expects Keycloak on the hub. With a site labelled `ai-grid/external-services=true`, Keycloak runs on that site, and the script doesn't support that layout yet.
+
+   It creates the OAuthClient `ai-grid-provider-console` and its proxy Secret, the backend's Keycloak user in realm `saas` with Secret `ai-grid-backend-keycloak`, and `ai-grid-backend-git` from the token file. Then it restarts the console.
+5. Open the Route's URL and sign in with an OpenShift login. Add to AI Grid and Remove need a login that may patch ManagedClusters.
+
+Verify: the console pod is Ready (`oc -n ai-grid-provider-console get pods`), the Clusters page lists the ManagedClusters, and the Organizations page lists realm `saas`'s organizations.
+
+Keycloak imports realm `saas` only when it doesn't exist, so a Keycloak restart keeps the backend's user and the organizations made in the console ([apps/keycloak/README.md](../../../apps/keycloak/README.md#realm-imports-and-git-edits)). Earlier versions rebuilt the realm on every start: on a hub where that already deleted them, rerun create-secrets.sh once to recreate the backend's user; organizations made in the console have to be made again.
 
 ## Grid ID
 
@@ -163,7 +201,7 @@ flowchart TD
 
 * Grid, v0.3.0-rc.2: https://github.com/praxis-proxy/grid/tree/v0.3.0-rc.2
 * grid-enrollment chart: https://github.com/praxis-proxy/grid/tree/v0.3.0-rc.2/charts/grid-enrollment
-* Vendored chart the lab installs: https://github.com/opendatahub-io/odh-gitops/tree/feature-ai-grid/charts/rhai-on-openshift-chart/charts/grid-enrollment
+* Vendored chart the lab installs: https://github.com/opendatahub-io/odh-gitops/tree/main/charts/rhai-on-openshift-chart/charts/grid-enrollment
 * Lab tenant: https://github.com/ai-grid-cloud/ai-grid-cluster-gitops
 * Argo bootstrap: https://github.com/ai-grid-cloud/ai-grid-cluster-gitops/blob/main/bootstrap.sh
 * ACM manifests: https://github.com/ai-grid-cloud/ai-grid-cluster-gitops/tree/main/apps/acm/manifests

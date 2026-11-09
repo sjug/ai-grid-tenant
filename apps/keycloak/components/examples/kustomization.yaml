@@ -1,0 +1,21 @@
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+# Example identity providers, organizations, and test realms.
+# Enabled by the default overlay. The core overlay omits it.
+resources:
+  - signing-keys-grid.yaml
+configMapGenerator:
+  # The saas realm with the example identity providers and organizations,
+  # and the example tenant IdP realms they broker to: each imported only when
+  # it doesn't exist, like the base realm. The tenant realms stand in for an
+  # organization's own identity provider, whose admin manages its users and
+  # groups at runtime.
+  - name: keycloak-realm-import
+    behavior: merge
+    files:
+      - saas-realm.json
+      - grid-tenant-1-idp-realm.json
+      - grid-tenant-2-idp-realm.json
+patches:
+  - path: keycloak-grid-keystores.patch.yaml
+  - path: saas-realm-sync.patch.yaml

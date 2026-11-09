@@ -1,0 +1,104 @@
+# Identity the token-provisioning Jobs in 31- and 32- run as.
+#
+# The Jobs mint ServiceAccount tokens for the writer and reader identities
+# apps/ai-grid-o11y owns, and write them into the Secrets in ai-grid-policies
+# that the spoke Policy ships to every selected site. A ServiceAccount token
+# is not a declarative object, so no manifest can hold it -- and ACM reads the
+# Secrets with fromSecret and delivers $ocm_encrypted ciphertext, so the token
+# itself never appears in a managed cluster's manifest either.
+#
+# Granted narrowly on purpose, mirroring
+# apps/ai-grid-o11y/manifests/rbac-provision-loki-key.yaml: `resourceNames`
+# pins the single object each rule needs, except `create`/`update` on Secrets,
+# where resourceNames cannot restrict creation (the name is in the request
+# body) -- so that rule is scoped to the namespace instead.
+#
+# Wave 3: before the 31-/32- hooks, and a wave earlier than the
+# 20-hub-template-rbac ServiceAccount both jobs' output must be readable by --
+# order within the sync does not matter for that pair, only presence by
+# PostSync, but the wave keeps the RBAC applied before anything that uses it.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: usage-logs-token-provisioner
+  namespace: redhat-ods-monitoring
+  annotations:
+    argocd.argoproj.io/sync-wave: "3"
+---
+# What the Jobs need in the identities' own namespace: mint a token for each
+# named ServiceAccount, confirm each exists, and -- for the reader -- read the
+# store Route the query endpoint is derived from.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: usage-logs-token-provisioner
+  namespace: redhat-ods-monitoring
+  annotations:
+    argocd.argoproj.io/sync-wave: "3"
+rules:
+  - apiGroups: [""]
+    resources: ["serviceaccounts/token"]
+    resourceNames: ["usage-logs-writer", "usage-logs-reader"]
+    verbs: ["create"]
+  - apiGroups: [""]
+    resources: ["serviceaccounts"]
+    resourceNames: ["usage-logs-writer", "usage-logs-reader"]
+    verbs: ["get"]
+  - apiGroups: ["route.openshift.io"]
+    resources: ["routes"]
+    resourceNames: ["usage-logs"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: usage-logs-token-provisioner
+  namespace: redhat-ods-monitoring
+  annotations:
+    argocd.argoproj.io/sync-wave: "3"
+subjects:
+  - kind: ServiceAccount
+    name: usage-logs-token-provisioner
+    namespace: redhat-ods-monitoring
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: usage-logs-token-provisioner
+---
+# What the Jobs need where the Secrets live: read the two credentials (pinned)
+# to decide whether a rotation is due, and write whichever one is re-minted.
+# The namespace itself is owned by apps/ai-grid-policies, which the Jobs rely
+# on having created.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: usage-logs-token-provisioner
+  namespace: ai-grid-policies
+  annotations:
+    argocd.argoproj.io/sync-wave: "3"
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    resourceNames:
+      - usage-logs-hub-credential
+      - usage-logs-hub-read-credential
+    verbs: ["get"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["create", "update", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: usage-logs-token-provisioner
+  namespace: ai-grid-policies
+  annotations:
+    argocd.argoproj.io/sync-wave: "3"
+subjects:
+  - kind: ServiceAccount
+    name: usage-logs-token-provisioner
+    namespace: redhat-ods-monitoring
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: usage-logs-token-provisioner

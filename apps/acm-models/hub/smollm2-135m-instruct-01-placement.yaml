@@ -2,7 +2,7 @@ apiVersion: cluster.open-cluster-management.io/v1beta1
 kind: Placement
 metadata:
   # Selects managed cluster for Argo CD registration, including the
-  # hub's local-cluster entry.
+  # hub's own entry.
   name: acm-models-smollm2-135m-instruct
   namespace: openshift-gitops
   annotations:

@@ -57,7 +57,7 @@ reads them; nothing identifies a site in a shared file.
 | `ai-grid/platform-namespaces=true` | ManagedCluster label | Only managed OpenShift, whose platform owns the Loki operator namespace; not on bare metal. |
 | `ai-grid/machine-network=<cidr with _>` | ManagedCluster label | Only where the provider gateway sees peers as node machine addresses. On the qualified path (OVN-Kubernetes, host-network router) peers arrive from the router node's management address, which the ingress policy group admits; [cluster onboarding](../cluster-onboarding/README.md) says how to observe the path. |
 | `lokistack.storageClassName` and the object-storage mode | `apps/ai-grid-o11y/values-site.yaml` | The hub, before the usage-logs chart syncs ([usage logs](../../../apps/ai-grid-o11y/chart/README.md)). |
-| External-services cluster ingress CA | `docs/acm/cluster-onboarding/trust-external-services-ca.sh` | Every MaaS site whose home's ingress certificate is privately signed. |
+| MaaS home ingress CA | Combined hub: automatic through `rhoai-ingress-clusters`; dedicated home: `docs/acm/cluster-onboarding/trust-external-services-ca.sh` | Every MaaS site whose home's ingress certificate is privately signed. |
 | Console backend's Keycloak URL | `KEYCLOAK_BACKEND_URL` to `apps/console/create-secrets.sh` | When the backend cannot trust the ingress CA ([console](../../../apps/console/README.md)). |
 
 ## Deployment order
@@ -68,14 +68,14 @@ reads them; nothing identifies a site in a shared file.
    deadline is derived from its waits. Commit `apps/ai-grid-o11y/values-site.yaml`
    with the hub's block class before the first sync.
 2. Sites: import, then label `ai-grid/enabled`; add the MetalLB label (with
-   its values file first, if any). On a fresh site the Authorino namespace and
-   the two trust ConfigMaps exist only once the role's RHOAI and connectivity
-   operators are installed, so label the role, then on an ingress or combined
-   site whose external-services cluster serves a privately signed ingress run the trust script as soon
-   as the ConfigMaps exist and wait for it to report the merged bundle mounted
-   and the discovery check passed; MaaS calls fail until then, so onboard
-   tenants after it. A site that already runs Authorino and changes its role
-   (for example inference to combined) runs the trust script before the
+   its values file first, if any). On a combined hub, label the ingress or
+   combined role and let ACM create `home-keycloak-ca` while RHOAI mounts it in
+   Authorino. On a fresh site whose dedicated external-services home serves a
+   privately signed ingress, label the role, then run the trust script as soon
+   as the trust ConfigMaps exist and wait for it to report the merged bundle
+   mounted and the discovery check passed; MaaS calls fail until then, so
+   onboard tenants after it. A site that already runs Authorino and changes its
+   role (for example inference to combined) runs the trust script before the
    role change, as the cluster-onboarding guide says.
 3. Models: [AI project onboarding](../ai-project-onboarding/README.md).
 

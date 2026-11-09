@@ -1,9 +1,12 @@
+{{- if .Values.operator.install }}
 apiVersion: operators.coreos.com/v1alpha1
 kind: Subscription
 metadata:
   name: metallb-operator
-  namespace: metallb-system
+  namespace: {{ .Values.operator.namespace }}
   annotations:
+    # Never pruned: switching operator.install or instance.create off hands the object over, it does not remove it.
+    argocd.argoproj.io/sync-options: Prune=false
     argocd.argoproj.io/sync-wave: "1"
 spec:
   name: metallb-operator
@@ -11,3 +14,4 @@ spec:
   source: {{ .Values.operator.source | quote }}
   sourceNamespace: openshift-marketplace
   installPlanApproval: Automatic
+{{- end }}

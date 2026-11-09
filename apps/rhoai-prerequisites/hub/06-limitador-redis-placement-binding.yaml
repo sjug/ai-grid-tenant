@@ -1,3 +1,33 @@
+# Remote sites that run MaaS: Limitador exists only on ingress and combined sites.
+apiVersion: cluster.open-cluster-management.io/v1beta1
+kind: Placement
+metadata:
+  name: rhoai-limitador-redis
+  namespace: rhoai-prerequisites
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+spec:
+  clusterSets:
+    - global
+  predicates:
+    - requiredClusterSelector:
+        labelSelector:
+          matchLabels:
+            ai-grid/enabled: "true"
+          matchExpressions:
+            - key: ai-grid/role
+              operator: In
+              values: [ingress, combined]
+            - key: local-cluster
+              operator: NotIn
+              values:
+                - "true"
+            # The external-services cluster runs Redis itself (apps/external-services).
+            - key: ai-grid/external-services
+              operator: NotIn
+              values:
+                - "true"
+---
 apiVersion: policy.open-cluster-management.io/v1
 kind: PlacementBinding
 metadata:
@@ -8,7 +38,7 @@ metadata:
 placementRef:
   apiGroup: cluster.open-cluster-management.io
   kind: Placement
-  name: rhoai-prerequisites-remote-clusters
+  name: rhoai-limitador-redis
 subjects:
   - apiGroup: policy.open-cluster-management.io
     kind: Policy

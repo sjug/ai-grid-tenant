@@ -8,7 +8,6 @@ metadata:
     argocd.argoproj.io/sync-wave: "1"
 spec:
   argoServer:
-    cluster: local-cluster
     argoNamespace: openshift-gitops
   placementRef:
     apiVersion: cluster.open-cluster-management.io/v1beta1
@@ -20,7 +19,7 @@ apiVersion: cluster.open-cluster-management.io/v1beta1
 kind: Placement
 metadata:
   # Selects every managed cluster for Argo CD registration, including the
-  # hub's local-cluster entry.
+  # hub's own entry.
   name: acm-models-gitops-cluster
   namespace: openshift-gitops
   annotations:

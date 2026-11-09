@@ -1,0 +1,77 @@
+# Mint the hub usage-log writer token, replacing the former
+# create-writer-token.sh. A ServiceAccount token is not a declarative object,
+# so no manifest can hold it; the Job mints it after sync and stores it in the
+# Secret the spoke Policy reads with fromSecret.
+#
+# Idempotent: if the stored token is still a JWT with more than a week left
+# before expiry, the Job does nothing. So a repeated sync (PostSync hooks run
+# on every sync) does not rotate a healthy credential, while expiry, deletion
+# of the Secret, or a manually shortened token triggers a re-mint on the next
+# sync -- rotation is the same operation as creation.
+#
+# Wave ordering is handled by the hook type: PostSync runs after the store's
+# own storage-key hook and every wave of this Application, so the
+# apps/ai-grid-o11y-owned ServiceAccount exists by then.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  generateName: provision-usage-logs-writer-token-
+  namespace: redhat-ods-monitoring
+  annotations:
+    argocd.argoproj.io/hook: PostSync
+    argocd.argoproj.io/hook-delete-policy: HookSucceeded
+spec:
+  template:
+    spec:
+      serviceAccountName: usage-logs-token-provisioner
+      containers:
+        - name: create-secret
+          image: registry.redhat.io/openshift4/ose-cli:latest
+          command: ["/bin/bash", "-c"]
+          args:
+            - |
+              set -Eeuo pipefail
+
+              SA_NAMESPACE=redhat-ods-monitoring
+              SA_NAME=usage-logs-writer
+              SECRET_NAMESPACE=ai-grid-policies
+              SECRET_NAME=usage-logs-hub-credential
+              TOKEN_DURATION=8760h
+
+              current="$(oc get secret ${SECRET_NAME} -n ${SECRET_NAMESPACE} \
+                -o jsonpath='{.data.token}' 2>/dev/null | base64 -d || true)"
+              if [ -n "$current" ]; then
+                # base64url-decode the JWT payload to read its expiry. A
+                # leftover buffer of one week keeps a healthy token from being
+                # re-minted on every sync while still rotating well before it
+                # lapses.
+                payload="$(printf '%s' "$current" | cut -d. -f2 | tr '_-' '/+')"
+                case $((${#payload} % 4)) in
+                  2) payload="${payload}==" ;;
+                  3) payload="${payload}=" ;;
+                esac
+                exp="$(printf '%s' "$payload" | base64 -d 2>/dev/null \
+                  | tr ',' '\n' | sed -n 's/.*"exp":\([0-9][0-9]*\).*/\1/p')"
+                if [ -n "$exp" ] && [ "$exp" -gt $(( $(date +%s) + 604800 )) ]; then
+                  echo "Token for ${SA_NAMESPACE}/${SA_NAME} is still valid (exp ${exp}); nothing to do."
+                  exit 0
+                fi
+              fi
+
+              # Never write an empty or truncated credential: the Policy would
+              # ship it to every site and each collector would fail to
+              # authenticate with no clear cause.
+              token="$(oc create token ${SA_NAME} -n ${SA_NAMESPACE} --duration=${TOKEN_DURATION})"
+              [ -n "$token" ] || { echo "failed to create a token for ${SA_NAMESPACE}/${SA_NAME}" >&2; exit 1; }
+              case "$token" in
+                *.*.*) ;;
+                *) echo "token for ${SA_NAMESPACE}/${SA_NAME} is not a JWT; refusing to write it" >&2; exit 1 ;;
+              esac
+
+              oc create secret generic ${SECRET_NAME} -n ${SECRET_NAMESPACE} \
+                --from-literal=token="$token" \
+                --dry-run=client -o yaml | oc apply -f -
+
+              echo "Created or updated ${SECRET_NAMESPACE}/${SECRET_NAME} from ${SA_NAMESPACE}/${SA_NAME}."
+      restartPolicy: Never
+  backoffLimit: 2

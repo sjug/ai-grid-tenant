@@ -1,24 +1,49 @@
-{{- if not .Values.pool.range }}
-{{- fail "pool.range is required: the metallb ApplicationSet sets it from the ai-grid/metallb-pool label" }}
+{{- $pools := .Values.pools }}
+{{- if not $pools }}
+  {{- if not .Values.range }}
+    {{- fail "range is required (the ai-grid/metallb-pool label) unless pools is set" }}
+  {{- end }}
+  {{- if not (regexMatch "^((25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])\\.){3}(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])-((25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])\\.){3}(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])$" .Values.range) }}
+    {{- fail (printf "range %q is not an IPv4 range first-last" .Values.range) }}
+  {{- end }}
+  {{- $ends := splitList "-" .Values.range }}
+  {{- $first := 0 }}{{- $last := 0 }}
+  {{- range $o := splitList "." (index $ends 0) }}{{ $first = add (mul $first 256) (atoi $o) }}{{ end }}
+  {{- range $o := splitList "." (index $ends 1) }}{{ $last = add (mul $last 256) (atoi $o) }}{{ end }}
+  {{- if gt $first $last }}
+    {{- fail (printf "range %q ends before it starts" .Values.range) }}
+  {{- end }}
+  {{- $pools = list (dict "name" "ai-grid" "addresses" (list .Values.range)) }}
 {{- end }}
+{{- range $pool := $pools }}
+{{- if not $pool.addresses }}
+  {{- fail (printf "pool %q has no addresses" $pool.name) }}
+{{- end }}
+---
 apiVersion: metallb.io/v1beta1
 kind: IPAddressPool
 metadata:
-  name: {{ .Values.pool.name }}
-  namespace: metallb-system
+  name: {{ $pool.name }}
+  namespace: {{ $.Values.operator.namespace }}
   annotations:
     argocd.argoproj.io/sync-wave: "3"
 spec:
+  autoAssign: {{ if hasKey $pool "autoAssign" }}{{ $pool.autoAssign }}{{ else }}true{{ end }}
   addresses:
-    - {{ .Values.pool.range | quote }}
+    {{- range $pool.addresses }}
+    - {{ . | quote }}
+    {{- end }}
+{{- if or (not (hasKey $pool "l2")) $pool.l2 }}
 ---
 apiVersion: metallb.io/v1beta1
 kind: L2Advertisement
 metadata:
-  name: {{ .Values.pool.name }}
-  namespace: metallb-system
+  name: {{ $pool.name }}
+  namespace: {{ $.Values.operator.namespace }}
   annotations:
     argocd.argoproj.io/sync-wave: "3"
 spec:
   ipAddressPools:
-    - {{ .Values.pool.name }}
+    - {{ $pool.name }}
+{{- end }}
+{{- end }}

@@ -1,26 +1,34 @@
 # Root ApplicationSet for a hub that runs no Grid or RHOAI workloads.
-# Install it with BOOTSTRAP_PROFILE=dedicated-hub ./bootstrap.sh.
+# Install it with BOOTSTRAP_PROFILE=dedicated-hub ./bootstrap.sh. It generates an
+# Application (dedicated-hub-root) that syncs bootstrap/dedicated-hub, so after
+# the initial bootstrap the ApplicationSet manages itself.
 apiVersion: argoproj.io/v1alpha1
 kind: ApplicationSet
 metadata:
   name: apps
   namespace: openshift-gitops
+  annotations:
+    argocd.argoproj.io/sync-options: Prune=false,Delete=false
 spec:
   goTemplate: true
   goTemplateOptions: ["missingkey=error"]
   syncPolicy:
     applicationsSync: sync
-    preserveResourcesOnDeletion: false
+    # Keep deployed resources when the root or a generated Application is removed.
+    preserveResourcesOnDeletion: true
   generators:
+    # ACM and argo-registration must start before a cluster Secret exists.
     - git:
         repoURL: https://github.com/sjug/ai-grid-tenant.git
         revision: main
         files:
           - path: apps/acm/application.yaml
           - path: apps/acm-models/application.yaml
+          - path: apps/ai-grid-o11y/application.yaml
           - path: apps/ai-grid-policies/application.yaml
           - path: apps/ai-grid-spokes/application.yaml
           - path: apps/cert-manager/application.yaml
+          - path: apps/console/application.yaml
           - path: apps/gitops-config/application.yaml
           - path: apps/grid-bootstrap/application.yaml
           - path: apps/external-services/application.yaml
@@ -28,9 +36,31 @@ spec:
           - path: apps/keycloak/application.yaml
           - path: apps/limitador-redis/application.yaml
           - path: apps/external-secrets/application.yaml
+          - path: apps/metallb/application.yaml
           - path: apps/argo-registration/application.yaml
           - path: apps/rhoai/application.yaml
           - path: apps/rhoai-prerequisites/application.yaml
+          - path: bootstrap/dedicated-hub/application.yaml
+          # The delivery half of the hub's MaaS usage-log store: the Loki operator that
+          # apps/ai-grid-o11y's LokiStack needs, and the ACM policy that hands each site
+          # the writer token. apps/odf, its object storage, is listed below.
+          - path: apps/ai-grid-usage-logs/application.yaml
+    # Only ODF needs cluster metadata. Wait for ACM registration and its
+    # version label rather than falling back to the chart's default channel.
+    - matrix:
+        generators:
+          - git:
+              repoURL: https://github.com/sjug/ai-grid-tenant.git
+              revision: main
+              files:
+                - path: apps/odf/application.yaml
+          - clusters:
+              selector:
+                matchLabels:
+                  apps.open-cluster-management.io/cluster-name: local-cluster
+                matchExpressions:
+                  - key: openshiftVersion-major-minor
+                    operator: Exists
   template:
     metadata:
       name: '{{.metadata.name}}'
@@ -40,23 +70,31 @@ spec:
       destination:
         server: '{{.spec.destination.server}}'
         namespace: '{{.spec.destination.namespace}}'
-  # ACM observability needs object storage, so it is left out. A new
-  # grid generates its CA, and grid-bootstrap binds global in place of the rhoai
-  # app's binding. acm-models brings only the sample model: argo-registration
-  # registers clusters here, and the console catalog is the combined hub's.
+  # ODF provides the object storage ACM observability needs, so acm syncs
+  # the full apps/acm/manifests. A new grid generates its CA, and grid-bootstrap
+  # binds global in place of the rhoai app's binding. acm-models brings the
+  # sample model and the console's catalog (its ApplicationSets and
+  # AppProjects), not its GitOpsCluster: argo-registration registers clusters
+  # here.
   # Limitador runs on the sites, so limitador-redis leaves out its storage config.
+  # ODF's operator channel follows the hub's OpenShift minor version.
+  # A hub labelled ai-grid/odf-operatorgroup=existing keeps its own OperatorGroup.
   templatePatch: |
     {{- $spec := .spec }}
-    {{- if eq .metadata.name "acm" }}
-    {{- $_ := set $spec.source "path" "apps/acm/manifests/dedicated-hub" }}
-    {{- end }}
     {{- if eq .metadata.name "grid-bootstrap" }}
     {{- range $spec.sources }}{{ if hasKey . "helm" }}
     {{- $_ := set .helm "parameters" (list (dict "name" "external.certManager.ca.mode" "value" "Generate") (dict "name" "managedClusters.createClusterSetBinding" "value" "true")) }}
     {{- end }}{{ end }}
     {{- end }}
+    {{- if eq .metadata.name "odf" }}
+    {{- $params := list (dict "name" "openshift.version" "value" (index .metadata.labels "openshiftVersion-major-minor")) }}
+    {{- if eq (index .metadata.labels "ai-grid/odf-operatorgroup") "existing" }}
+    {{- $params = append $params (dict "name" "operatorGroup.create" "value" "false") }}
+    {{- end }}
+    {{- $_ := set $spec.source.helm "parameters" $params }}
+    {{- end }}
     {{- if eq .metadata.name "acm-models" }}
-    {{- $_ := set $spec.source "directory" (dict "include" "{facebook-opt-125m-03-applicationset.yaml,maas-03-applicationset.yaml}") }}
+    {{- $_ := set $spec.source "directory" (dict "include" "{facebook-opt-125m-03-applicationset.yaml,maas-03-applicationset.yaml,catalog-03-appprojects.yaml,catalog-04-applicationsets.yaml}") }}
     {{- end }}
     {{- if eq .metadata.name "limitador-redis" }}
     {{- $_ := set $spec.source "directory" (dict "exclude" "{04-limitador-redis-secret.yaml,20-limitador-storage.yaml}") }}

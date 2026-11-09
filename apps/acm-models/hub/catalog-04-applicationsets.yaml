@@ -26,11 +26,21 @@ spec:
     # catalog shows no errors.
     - matrix:
         generators:
-          - clusterDecisionResource:
-              configMapRef: acm-placement
-              labelSelector:
-                matchLabels:
-                  cluster.open-cluster-management.io/placement: ai-grid-inference
+          - matrix:
+              generators:
+                - clusterDecisionResource:
+                    configMapRef: acm-placement
+                    labelSelector:
+                      matchLabels:
+                        cluster.open-cluster-management.io/placement: ai-grid-inference
+                    requeueAfterSeconds: 60
+                - clusters:
+                    # The cluster's Argo CD Secret, for its labels: a hub that is also a site syncs
+                    # through the in-cluster API, not the ACM cluster proxy.
+                    selector:
+                      matchLabels:
+                        apps.open-cluster-management.io/acm-cluster: "true"
+                        name: '{{ .clusterName }}'
           - git:
               repoURL: https://github.com/sjug/ai-grid-catalog.git
               revision: main
@@ -48,7 +58,7 @@ spec:
         path: '{{.path.path}}'
         kustomize: {}
       destination:
-        server: '{{.server}}'
+        server: '{{ if eq (index .metadata.labels "local-cluster") "true" }}https://kubernetes.default.svc{{ else }}{{ .server }}{{ end }}'
         namespace: ai-grid-internal-models
       syncPolicy:
         # allowEmpty: Argo CD otherwise refuses to prune to nothing.
@@ -89,11 +99,21 @@ spec:
     # catalog shows no errors.
     - matrix:
         generators:
-          - clusterDecisionResource:
-              configMapRef: acm-placement
-              labelSelector:
-                matchLabels:
-                  cluster.open-cluster-management.io/placement: ai-grid-ingress
+          - matrix:
+              generators:
+                - clusterDecisionResource:
+                    configMapRef: acm-placement
+                    labelSelector:
+                      matchLabels:
+                        cluster.open-cluster-management.io/placement: ai-grid-ingress
+                    requeueAfterSeconds: 60
+                - clusters:
+                    # The cluster's Argo CD Secret, for its labels: a hub that is also a site syncs
+                    # through the in-cluster API, not the ACM cluster proxy.
+                    selector:
+                      matchLabels:
+                        apps.open-cluster-management.io/acm-cluster: "true"
+                        name: '{{ .clusterName }}'
           - git:
               repoURL: https://github.com/sjug/ai-grid-catalog.git
               revision: main
@@ -115,7 +135,7 @@ spec:
         path: '{{.path.path}}'
         kustomize: {}
       destination:
-        server: '{{.server}}'
+        server: '{{ if eq (index .metadata.labels "local-cluster") "true" }}https://kubernetes.default.svc{{ else }}{{ .server }}{{ end }}'
         namespace: models-as-a-service
       syncPolicy:
         # allowEmpty: Argo CD otherwise refuses to prune to nothing.
@@ -155,11 +175,21 @@ spec:
     # catalog shows no errors.
     - matrix:
         generators:
-          - clusterDecisionResource:
-              configMapRef: acm-placement
-              labelSelector:
-                matchLabels:
-                  cluster.open-cluster-management.io/placement: ai-grid-ingress
+          - matrix:
+              generators:
+                - clusterDecisionResource:
+                    configMapRef: acm-placement
+                    labelSelector:
+                      matchLabels:
+                        cluster.open-cluster-management.io/placement: ai-grid-ingress
+                    requeueAfterSeconds: 60
+                - clusters:
+                    # The cluster's Argo CD Secret, for its labels: a hub that is also a site syncs
+                    # through the in-cluster API, not the ACM cluster proxy.
+                    selector:
+                      matchLabels:
+                        apps.open-cluster-management.io/acm-cluster: "true"
+                        name: '{{ .clusterName }}'
           - git:
               repoURL: https://github.com/sjug/ai-grid-catalog.git
               revision: main
@@ -182,7 +212,7 @@ spec:
         directory:
           include: "*.yaml"
       destination:
-        server: '{{.server}}'
+        server: '{{ if eq (index .metadata.labels "local-cluster") "true" }}https://kubernetes.default.svc{{ else }}{{ .server }}{{ end }}'
         namespace: models-as-a-service
       syncPolicy:
         # allowEmpty: Argo CD otherwise refuses to prune to nothing.

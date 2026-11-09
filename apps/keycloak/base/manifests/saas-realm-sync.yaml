@@ -1,0 +1,201 @@
+# Two Argo CD PostSync hooks apply saas-realm.json to an existing saas realm,
+# which Keycloak doesn't re-import on start. Argo CD runs them in sync-wave
+# order, after the Keycloak Deployment is healthy:
+# 1. keycloak-realm-sync-bootstrap holds the bootstrap admin's credentials and
+#    uses them only when the keycloak-realm-sync client can't sign in or lacks
+#    its roles, to create or repair that client.
+# 2. keycloak-saas-realm-sync signs in as keycloak-realm-sync and holds only
+#    the values the saas realm file's placeholders need.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: keycloak-realm-sync-bootstrap
+  labels:
+    app.kubernetes.io/name: keycloak-realm-sync-bootstrap
+    app.kubernetes.io/part-of: keycloak
+  annotations:
+    argocd.argoproj.io/hook: PostSync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation,HookSucceeded
+    argocd.argoproj.io/sync-wave: "0"
+spec:
+  backoffLimit: 2
+  activeDeadlineSeconds: 900
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: keycloak-realm-sync-bootstrap
+    spec:
+      restartPolicy: Never
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: bootstrap
+          image: registry.redhat.io/openshift4/ose-cli@sha256:75bd612f3d2b4dbddcbd7a48e12b5cb4d36e4a2683e7f48209e40596e0fbfc30
+          imagePullPolicy: IfNotPresent
+          command:
+            - python3
+            - /opt/keycloak/realm-scripts/sync-saas-realm.py
+            - bootstrap
+            - /opt/keycloak/realm-import-source/saas-realm.json
+          env:
+            - name: PYTHONDONTWRITEBYTECODE
+              value: "1"
+            - name: KEYCLOAK_URL
+              value: http://keycloak.maas-db.svc.cluster.local:8080
+            - name: KEYCLOAK_REALM_SYNC_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: keycloak-realm-sync-secret
+                  key: KEYCLOAK_REALM_SYNC_CLIENT_SECRET
+            - name: KC_BOOTSTRAP_ADMIN_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: keycloak-secrets
+                  key: KC_BOOTSTRAP_ADMIN_USERNAME
+            - name: KC_BOOTSTRAP_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: keycloak-secrets
+                  key: KC_BOOTSTRAP_ADMIN_PASSWORD
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          resources:
+            requests:
+              cpu: 10m
+              memory: 64Mi
+            limits:
+              memory: 128Mi
+          volumeMounts:
+            - name: realm-import-source
+              mountPath: /opt/keycloak/realm-import-source
+              readOnly: true
+            - name: realm-scripts
+              mountPath: /opt/keycloak/realm-scripts
+              readOnly: true
+      volumes:
+        - name: realm-import-source
+          configMap:
+            name: keycloak-realm-import
+        - name: realm-scripts
+          configMap:
+            name: keycloak-realm-scripts
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: keycloak-saas-realm-sync
+  labels:
+    app.kubernetes.io/name: keycloak-saas-realm-sync
+    app.kubernetes.io/part-of: keycloak
+  annotations:
+    argocd.argoproj.io/hook: PostSync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation,HookSucceeded
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  backoffLimit: 2
+  activeDeadlineSeconds: 900
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: keycloak-saas-realm-sync
+    spec:
+      restartPolicy: Never
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: sync
+          image: registry.redhat.io/openshift4/ose-cli@sha256:75bd612f3d2b4dbddcbd7a48e12b5cb4d36e4a2683e7f48209e40596e0fbfc30
+          imagePullPolicy: IfNotPresent
+          command:
+            - /bin/bash
+            - -c
+            - |
+              set -Eeuo pipefail
+
+              bash /opt/keycloak/realm-scripts/render-realm.sh \
+                < /opt/keycloak/realm-import-source/saas-realm.json > /work/saas-realm.json
+              python3 /opt/keycloak/realm-scripts/sync-saas-realm.py sync /work/saas-realm.json
+          # Exactly the placeholders of the saas realm file, and the sync
+          # client's secret. The examples component adds its placeholders.
+          env:
+            - name: PYTHONDONTWRITEBYTECODE
+              value: "1"
+            - name: KEYCLOAK_URL
+              value: http://keycloak.maas-db.svc.cluster.local:8080
+            - name: KEYCLOAK_REALM_SYNC_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: keycloak-realm-sync-secret
+                  key: KEYCLOAK_REALM_SYNC_CLIENT_SECRET
+            - name: KEYCLOAK_CLIENT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: keycloak-secrets
+                  key: KEYCLOAK_CLIENT_ID
+            - name: KEYCLOAK_HOME_URL
+              valueFrom:
+                secretKeyRef:
+                  name: keycloak-secrets
+                  key: KEYCLOAK_HOME_URL
+            - name: KEYCLOAK_REDIRECT_URI
+              valueFrom:
+                secretKeyRef:
+                  name: keycloak-secrets
+                  key: KEYCLOAK_REDIRECT_URI
+            - name: KEYCLOAK_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: keycloak-secrets
+                  key: KEYCLOAK_CLIENT_SECRET
+            - name: KEYCLOAK_REDIRECT_URIS_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: keycloak-redirect-uris-secret
+                  key: KEYCLOAK_REDIRECT_URIS_CLIENT_SECRET
+            - name: KEYCLOAK_SIGNING_KEYSTORE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: keycloak-signing-keystore-password
+                  key: password
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          resources:
+            requests:
+              cpu: 10m
+              memory: 64Mi
+            limits:
+              memory: 128Mi
+          volumeMounts:
+            - name: realm-import-source
+              mountPath: /opt/keycloak/realm-import-source
+              readOnly: true
+            - name: realm-scripts
+              mountPath: /opt/keycloak/realm-scripts
+              readOnly: true
+            - name: work
+              mountPath: /work
+      volumes:
+        - name: realm-import-source
+          configMap:
+            name: keycloak-realm-import
+        - name: realm-scripts
+          configMap:
+            name: keycloak-realm-scripts
+        - name: work
+          emptyDir:
+            medium: Memory
+            sizeLimit: 4Mi

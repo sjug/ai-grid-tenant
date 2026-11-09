@@ -15,7 +15,12 @@ Environment overrides:
                          KEYCLOAK_REDIRECT_URI from the Keycloak secret.
   ASSUME_YES             Set to 1 to proceed without the inference and
                          rate-limit approval prompts.
-  GATEWAY_HOST          MaaS Gateway hostname. Defaults to the Gateway status address.
+  GATEWAY_HOST          MaaS Gateway hostname used for the HTTP Host header.
+                         Defaults to the listener hostname for GATEWAY_PROTOCOL,
+                         then the Gateway status address.
+  GATEWAY_CONNECT_ADDRESS
+                         Address curl connects to. Defaults to the Gateway
+                         status address, then GATEWAY_HOST. May include a port.
   GATEWAY_PROTOCOL      Gateway protocol. Defaults to http.
   KEYCLOAK_NAMESPACE    Namespace containing the Keycloak secret. Defaults to maas-db.
   KEYCLOAK_SECRET_NAME  Secret containing Keycloak runtime values. Defaults to keycloak-secrets.
@@ -35,6 +40,12 @@ Environment overrides:
                          Defaults to 1.
   RATE_LIMIT_PROBE_ATTEMPTS
                          Maximum number of 429 probe requests. Defaults to 3.
+  REQUIRE_INFERENCE     Set to 1 to fail when inference is skipped, 0 to allow it.
+                         Defaults to 1 for alice and bob, 0 for carol.
+  EXPECT_MODEL          Fail unless inference uses this model name.
+
+Every skipped stage is listed in the result, and a run that skipped a required
+stage fails.
 EOF
 }
 
@@ -49,6 +60,14 @@ require_cmd() {
 
 print_section() {
   printf '\n== %s ==\n' "$1"
+}
+
+skipped_stages=()
+
+# Report a skipped stage and remember it for the result.
+skip_stage() {
+  printf '  skipped: %s\n' "$2"
+  skipped_stages+=("$1")
 }
 
 confirm_action() {
@@ -97,12 +116,18 @@ case "$user" in
   carol)
     broker_hint=grid-tenant-2
     password_key=GRID_TENANT_2_TEST_USER_PASSWORD
+    # Carol checks inventory only.
+    default_require_inference=0
     ;;
   *)
     usage >&2
     exit 2
     ;;
 esac
+
+require_inference="${REQUIRE_INFERENCE:-${default_require_inference:-1}}"
+[[ "$require_inference" == 0 || "$require_inference" == 1 ]] || fail "REQUIRE_INFERENCE must be 0 or 1"
+expect_model="${EXPECT_MODEL:-}"
 
 for cmd in kubectl curl jq sed awk; do
   require_cmd "$cmd"
@@ -116,6 +141,11 @@ gateway_name="${GATEWAY_NAME:-maas-default-gateway}"
 gateway_kube_context="${GATEWAY_KUBE_CONTEXT:-}"
 client_id="${OIDC_CLIENT_ID:-tenant-demo}"
 gateway_protocol="${GATEWAY_PROTOCOL:-http}"
+gateway_port=80
+case "$gateway_protocol" in
+  http) gateway_port=80 ;;
+  https) gateway_port=443 ;;
+esac
 redirect_uri="${REDIRECT_URI:-}"
 inference_prompt="${INFERENCE_PROMPT:-Reply with: MaaS OIDC inference succeeded.}"
 inference_max_tokens="${INFERENCE_MAX_TOKENS:-32}"
@@ -157,20 +187,67 @@ password=$(
 [[ -n "$password" ]] || fail "$password_key is empty in $keycloak_secret_name"
 keycloak_url="${keycloak_url%/}"
 
+gateway_kubectl_args=()
+if [[ -n "$gateway_kube_context" ]]; then
+  gateway_kubectl_args=(--context "$gateway_kube_context")
+fi
+
+gateway_json=""
+if [[ -z "${GATEWAY_HOST:-}" || -z "${GATEWAY_CONNECT_ADDRESS:-}" ]]; then
+  if ! gateway_json=$(
+    kubectl "${gateway_kubectl_args[@]}" get gateway "$gateway_name" -n "$gateway_namespace" -o json 2>/dev/null
+  ); then
+    if [[ -n "${GATEWAY_HOST:-}" && -z "${GATEWAY_CONNECT_ADDRESS:-}" ]]; then
+      gateway_json=""
+    else
+      fail "could not read MaaS Gateway ${gateway_namespace}/${gateway_name}"
+    fi
+  fi
+fi
+
 if [[ -n "${GATEWAY_HOST:-}" ]]; then
   gateway_host="$GATEWAY_HOST"
 else
-  gateway_kubectl_args=()
-  if [[ -n "$gateway_kube_context" ]]; then
-    gateway_kubectl_args=(--context "$gateway_kube_context")
-  fi
   gateway_host=$(
-    kubectl "${gateway_kubectl_args[@]}" get gateway "$gateway_name" -n "$gateway_namespace" \
-      -o jsonpath='{.status.addresses[0].value}'
+    jq -r --arg protocol "$gateway_protocol" '
+      [
+        .spec.listeners[]?
+        | select(((.protocol // .name // "") | ascii_downcase) == $protocol)
+        | .hostname // empty
+        | select(. != "")
+      ][0] // empty
+    ' <<<"$gateway_json"
   )
+  if [[ -z "$gateway_host" ]]; then
+    gateway_host=$(
+      jq -r '[.status.addresses[]?.value // empty | select(. != "")][0] // empty' <<<"$gateway_json"
+    )
+  fi
 fi
+
+if [[ -n "${GATEWAY_CONNECT_ADDRESS:-}" ]]; then
+  gateway_connect_address="$GATEWAY_CONNECT_ADDRESS"
+else
+  gateway_connect_address=$(
+    jq -r '[.status.addresses[]?.value // empty | select(. != "")][0] // empty' <<<"$gateway_json"
+  )
+  if [[ -z "$gateway_connect_address" ]]; then
+    gateway_connect_address="$gateway_host"
+  fi
+fi
+
 [[ -n "$gateway_host" ]] || fail "could not determine the MaaS Gateway hostname"
+[[ -n "$gateway_connect_address" ]] || fail "could not determine the MaaS Gateway connect address"
+[[ "$gateway_host" != *"://"* && "$gateway_host" != *"/"* ]] ||
+  fail "GATEWAY_HOST must be a hostname, not a URL"
+[[ "$gateway_connect_address" != *"://"* && "$gateway_connect_address" != *"/"* ]] ||
+  fail "GATEWAY_CONNECT_ADDRESS must be a host or host:port, not a URL"
+
 base_url="${gateway_protocol}://${gateway_host}"
+
+gateway_curl() {
+  curl --connect-to "${gateway_host}:${gateway_port}:${gateway_connect_address}" "$@"
+}
 
 umask 077
 tmpdir=$(mktemp -d)
@@ -183,6 +260,7 @@ print_section "Runtime configuration"
 printf '  user: %s\n' "$user"
 printf '  Keycloak issuer: %s\n' "$keycloak_url/realms/saas"
 printf '  Gateway host: %s\n' "$gateway_host"
+printf '  Gateway connect address: %s\n' "$gateway_connect_address"
 printf '  Gateway context: %s\n' "${gateway_kube_context:-current}"
 printf '  Gateway: %s\n' "$base_url"
 printf '  OIDC client: %s\n' "$client_id"
@@ -279,7 +357,7 @@ fi
 
 me_response="$tmpdir/me-response.json"
 me_status=$(
-  curl -sS --max-time 20 \
+  gateway_curl -sS --max-time 20 \
     -H "Authorization: Bearer $(cat "$token_file")" \
     -o "$me_response" -w '%{http_code}' \
     "$base_url/v1/me"
@@ -300,7 +378,7 @@ done < <(jq -r '."https://redhat.com/maas/orgs"[]? | [.organization_id, (.roles 
 
 subscriptions_response="$tmpdir/subscriptions-response.json"
 subscriptions_status=$(
-  curl -sS --max-time 20 \
+  gateway_curl -sS --max-time 20 \
     -H "Authorization: Bearer $(cat "$token_file")" \
     -o "$subscriptions_response" -w '%{http_code}' \
     "$base_url/v1/subscriptions"
@@ -350,7 +428,7 @@ if (( owner_subscription_count > 0 )); then
 
   api_key_response="$tmpdir/api-key-response.json"
   api_key_status=$(
-    curl -sS --max-time 20 \
+    gateway_curl -sS --max-time 20 \
       -H "Authorization: Bearer $(cat "$token_file")" \
       -H 'Content-Type: application/json' \
       -d "$api_key_request" \
@@ -376,7 +454,7 @@ if (( owner_subscription_count > 0 )); then
   printf '  key file: %s\n' "$api_key_file"
 else
   print_section "POST /v1/api-keys"
-  printf '  skipped: no owner-accessible subscription\n'
+  skip_stage api-key 'no owner-accessible subscription'
 fi
 
 api_key_list_request=$(jq -n '{
@@ -391,7 +469,7 @@ api_key_list_request=$(jq -n '{
 
 api_key_list_response="$tmpdir/api-key-list-response.json"
 api_key_list_status=$(
-  curl -sS --max-time 20 \
+  gateway_curl -sS --max-time 20 \
     -H "Authorization: Bearer $(cat "$token_file")" \
     -H 'Content-Type: application/json' \
     -d "$api_key_list_request" \
@@ -433,16 +511,19 @@ inference_succeeded=0
 
 if [[ -z "$api_key_id" ]]; then
   print_section "POST /v1/completions"
-  printf '  skipped: no owner-accessible API key was provisioned\n'
+  skip_stage inference 'no owner-accessible API key was provisioned'
 else
   inference_model_ref=$(
     jq -c '[.[] | select(((.roles // []) | length == 0) or ((.roles // []) | index("owner") != null))][0].model_refs[0] // empty' \
       "$subscriptions_response"
   )
   inference_model=$(jq -r '.name // empty' <<<"$inference_model_ref")
+  if [[ -n "$expect_model" && -n "$inference_model" && "$inference_model" != "$expect_model" ]]; then
+    fail "inference would use model $inference_model, not EXPECT_MODEL $expect_model"
+  fi
   if [[ -z "$inference_model" ]]; then
     print_section "POST /v1/completions"
-    printf '  skipped: no model is available through the subscription\n'
+    skip_stage inference 'no model is available through the subscription'
   else
     confirm_action "Send one completion request to the MaaS Gateway using the newly created ephemeral API key.
 Endpoint: /v1/completions
@@ -461,7 +542,7 @@ Prompt: $inference_prompt" || fail "inference request was not approved"
 
     completions_response="$tmpdir/completions-response.json"
     completions_status=$(
-      curl -sS --max-time 60 \
+      gateway_curl -sS --max-time 60 \
         -H "Authorization: Bearer $(cat "$api_key_file")" \
         -H 'Content-Type: application/json' \
         -d "$completions_request" \
@@ -491,7 +572,7 @@ fi
 
 if [[ "$inference_succeeded" -ne 1 ]]; then
   print_section "Token rate limit"
-  printf '  skipped: inference was not completed\n'
+  skip_stage rate-limit 'inference was not completed'
 else
   rate_limit=$(
     jq -c '.token_rate_limits // [] | min_by(.limit) // empty' <<<"$inference_model_ref"
@@ -499,7 +580,7 @@ else
 
   if [[ -z "$rate_limit" ]]; then
     print_section "Token rate limit"
-    printf '  skipped: the selected model has no finite token rate limit\n'
+    skip_stage rate-limit 'the selected model has no finite token rate limit'
   else
     rate_limit_limit=$(jq -r '.limit' <<<"$rate_limit")
     rate_limit_window=$(jq -r '.window // "unknown"' <<<"$rate_limit")
@@ -516,8 +597,7 @@ else
 
     if (( rate_limit_prompt_tokens > rate_limit_max_prompt_tokens )); then
       print_section "Token rate limit"
-      printf '  skipped: the %s-token exhaustion prompt exceeds RATE_LIMIT_MAX_PROMPT_TOKENS (%s)\n' \
-        "$rate_limit_prompt_tokens" "$rate_limit_max_prompt_tokens"
+      skip_stage rate-limit "the ${rate_limit_prompt_tokens}-token exhaustion prompt exceeds RATE_LIMIT_MAX_PROMPT_TOKENS (${rate_limit_max_prompt_tokens})"
     else
       confirm_action "Send additional completion requests to exhaust and verify the subscription token rate limit.
 Endpoint: /v1/completions
@@ -540,7 +620,7 @@ subsequent probes expect HTTP 429." ||
 
       rate_limit_exhaust_response="$tmpdir/rate-limit-exhaust-response.json"
       rate_limit_exhaust_status=$(
-        curl -sS --max-time 60 \
+        gateway_curl -sS --max-time 60 \
           -H "Authorization: Bearer $(cat "$api_key_file")" \
           -H 'Content-Type: application/json' \
           -d "$rate_limit_exhaust_request" \
@@ -580,7 +660,7 @@ subsequent probes expect HTTP 429." ||
 
           rate_limit_probe_response="$tmpdir/rate-limit-probe-response.json"
           rate_limit_probe_status=$(
-            curl -sS --max-time 60 \
+            gateway_curl -sS --max-time 60 \
               -H "Authorization: Bearer $(cat "$api_key_file")" \
               -H 'Content-Type: application/json' \
               -d "$rate_limit_probe_request" \
@@ -612,4 +692,12 @@ subsequent probes expect HTTP 429." ||
 fi
 
 print_section "Smoke result"
-printf '  result: passed\n'
+if [[ "$require_inference" == 1 && "$inference_succeeded" -ne 1 ]]; then
+  fail "inference is required for $user but did not run"
+fi
+if (( ${#skipped_stages[@]} > 0 )); then
+  printf '  skipped: %s\n' "${skipped_stages[@]}"
+  printf '  result: passed with skips\n'
+else
+  printf '  result: passed\n'
+fi

@@ -1,4 +1,7 @@
-# Identity the usage-logs collector writes with (bound to usage-logs-infrastructure-writer).
+# The identity a site's collector authenticates to this store as.
+# clusterrolebinding-usage-logs-infrastructure-writer.yaml already names it as
+# its subject; without this the binding grants its ClusterRole to nothing and
+# no site can write. apps/ai-grid-usage-logs mints the token.
 apiVersion: v1
 kind: ServiceAccount
 metadata:

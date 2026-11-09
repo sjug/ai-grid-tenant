@@ -10,7 +10,7 @@ spec:
       targetRevision: main
       ref: values
     - repoURL: https://github.com/opendatahub-io/odh-gitops.git
-      targetRevision: 44ba050152e66982c066f1f4fb6716260976e4bf # odh-gitops feature-ai-grid, pinned 2026-10-30
+      targetRevision: be248f9cfa34b8a9aabcc614d277baa33d4a66e5 # odh-gitops main, grid-enrollment 0.3.0-rc.4, pinned 2026-11-09
       path: charts/rhai-on-openshift-chart/charts/grid-enrollment
       helm:
         releaseName: grid-bootstrap

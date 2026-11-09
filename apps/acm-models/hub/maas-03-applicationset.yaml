@@ -10,11 +10,21 @@ spec:
   goTemplateOptions: ["missingkey=error"]
   generators:
     # Sites that run MaaS: role ingress or combined (apps/ai-grid-spokes).
-    - clusterDecisionResource:
-        configMapRef: acm-placement
-        labelSelector:
-          matchLabels:
-            cluster.open-cluster-management.io/placement: ai-grid-ingress
+    - matrix:
+        generators:
+          - clusterDecisionResource:
+              configMapRef: acm-placement
+              labelSelector:
+                matchLabels:
+                  cluster.open-cluster-management.io/placement: ai-grid-ingress
+              requeueAfterSeconds: 60
+          - clusters:
+              # The cluster's Argo CD Secret, for its labels: a hub that is also a site syncs
+              # through the in-cluster API, not the ACM cluster proxy.
+              selector:
+                matchLabels:
+                  apps.open-cluster-management.io/acm-cluster: "true"
+                  name: '{{ .clusterName }}'
   syncPolicy:
     applicationsSync: sync
     preserveResourcesOnDeletion: false
@@ -31,7 +41,7 @@ spec:
         directory:
           recurse: true
       destination:
-        server: '{{.server}}'
+        server: '{{ if eq (index .metadata.labels "local-cluster") "true" }}https://kubernetes.default.svc{{ else }}{{ .server }}{{ end }}'
         namespace: models-as-a-service
       syncPolicy:
         automated:

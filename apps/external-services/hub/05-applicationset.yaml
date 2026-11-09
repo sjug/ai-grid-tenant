@@ -34,7 +34,7 @@ spec:
                   exclude: ""
                   prune: "true"
                 - component: maas-db
-                  path: apps/maas-db/local-cluster
+                  path: apps/maas-db/primary
                   namespace: maas-db
                   exclude: 20-service-export.yaml
                   prune: "false"

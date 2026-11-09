@@ -1,5 +1,5 @@
-# Inform only: a cluster is provisioned once its DataScienceCluster reports
-# KServe and the grid ready and the grid operator runs. The provider console's
+# Inform only: a cluster is provisioned once its DataScienceCluster reports the
+# role's serving state and the grid ready and the grid operator runs. The provider console's
 # backend reads this root Policy's per-cluster compliance (its default
 # AI_GRID_READY_POLICY, ai-grid-policies/ai-grid-ready) as each cluster's
 # provisioning state.
@@ -28,15 +28,17 @@ spec:
                 kind: DataScienceCluster
                 metadata:
                   name: default-dsc
-                # What serving needs, not the DSC's overall phase: on an
-                # inference-only cluster (MaaS Removed, the AI Gateway module
+                # Ingress sites intentionally remove KServe; inference and combined
+                # sites require it. What serving needs, not the DSC's overall phase:
+                # on an inference-only cluster (MaaS Removed, the AI Gateway module
                 # running only the grid) the operator reports AIGatewayReady=False
                 # "0/0 deployments ready", so the DSC never reaches Ready although
                 # KServe and the grid are up.
                 status:
                   conditions:
                     - type: KserveReady
-                      status: "True"
+                      status: >-
+                        {{hub if eq (index .ManagedClusterLabels "ai-grid/role") "ingress" hub}}False{{hub else hub}}True{{hub end hub}}
                     - type: AIGridReady
                       status: "True"
             - complianceType: musthave

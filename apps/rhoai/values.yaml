@@ -1,5 +1,39 @@
 skipCrdCheck: true
-profile: maas
+components:
+  aigateway:
+    modelsAsAService:
+      gateway:
+        name: maas-default-gateway
+        namespace: openshift-ingress
+        annotations:
+          ai-grid/maas-gateway-hostname-prefix: maas
+        spec:
+          infrastructure:
+            annotations:
+              # Envoy statistics Istio's default matcher drops: ext_proc, ext_authz, the Kuadrant wasm
+              # shim and Limitador, downstream and upstream counters. Changing it restarts the gateway pods.
+              proxy.istio.io/config: &envoy-stats |
+                proxyStatsMatcher:
+                  inclusionRegexps:
+                    - ".*ext_proc.*"
+                    - ".*ext_authz.*"
+                    - ".*ratelimit.*"
+                    - ".*wasm.*"
+                    - "http\\..*\\.downstream_rq_.*"
+                    - "http\\..*\\.downstream_cx_.*"
+                    - "listener\\..*\\.downstream_cx_.*"
+                    - "cluster\\..*\\.upstream_(rq|cx)_.*"
+                    - "server\\..*"
+                    - "overload\\..*"
+                    - "cluster\\..*\\.outlier_detection\\..*"
+  kserve:
+    gateway:
+      spec:
+        infrastructure:
+          annotations:
+            # The same statistics for the serving gateway.
+            proxy.istio.io/config: *envoy-stats
+
 operator:
   type: rhoai
   rhoai:
@@ -10,243 +44,29 @@ operator:
       channel: stable-3.6
       # ACM owns this Red Hat managed Namespace; OSD rejects Argo writes to it.
       createNamespace: false
-      config:
-        env:
-          # Grid v0.3.0-rc.3 operator from the release on ghcr, until RHDS ships rc.3.
-          - name: RELATED_IMAGE_ODH_PRAXIS_AI_GRID_OPERATOR_IMAGE
-            value: ghcr.io/praxis-proxy/grid-operator@sha256:f3810434f13577d9940e25196b2bf37ba81c26765c5781d4679515814d7bdd22
-          # ODH KServe build of opendatahub-io/kserve#2128 (EPP metrics over TLS) at
-          # 27a1755, until the RHOAI 3.6 payload carries it.
-          - name: RELATED_IMAGE_ODH_KSERVE_LLMISVC_CONTROLLER_IMAGE
-            value: quay.io/opendatahub/odh-kserve-llmisvc-controller@sha256:69d54ad4c94726d5a0eca8202ba5820b70ea0bfa55f7998b440966dbd566f0a6
-          # ODH model controller at ee3dcb8 (odh-model-controller#999: the Role grants the
-          # publisher path it dials), to prove the grid-model-client-models binding in
-          # rhoai-prerequisites can go; until the RHOAI 3.6 payload carries it.
-          - name: RELATED_IMAGE_ODH_MODEL_CONTROLLER_IMAGE
-            value: quay.io/opendatahub/odh-model-controller@sha256:4fefe21382dbe0e0d55f735078b6ef751c06204463b974783f2d14d2636c753a
-# Workaround for https://redhat.atlassian.net/browse/RHOAIENG-99507:
-# RHACM's multicluster-observability-addon also installs COO with its own
-# OperatorGroup (named after the namespace), which conflicts with the chart's
-# (named after the package) and blocks CSV installs/upgrades. Let RHACM own
-# COO on this cluster until the OG naming is standardized in odh-gitops.
 dependencies:
-  rhcl:
+  opentelemetry:
     olm:
-      config:
-        env:
-          - name: AUTH_SERVICE_TIMEOUT
-            value: 1s
-    config:
-      authorinoServiceCaTrust: true
-  clusterObservability:
+      # Keep aligned with the cert-manager compatibility grant in apps/rhoai-prerequisites/hub/12-otel-cert-manager-policy.yaml.
+      namespace: openshift-opentelemetry-operator
+  # No GPUs on this deployment's sites; the inference profile would install both operators.
+  nfd:
     enabled: false
-  loki:
-    olm:
-      # The platform owns this Red Hat managed Namespace.
-      createNamespace: false
-services:
-  monitoring:
-    dsci:
-      managementState: Managed
-      # Minimal dev config: metrics need storage size; traces require a
-      # storage backend (pv = ephemeral-ish local dev storage, no S3 needed).
-      # ACM reads the collector's own prometheus exporter, so no extra exporter here.
-      metrics:
-        storage:
-          size: 20Gi
-      traces:
-        storage:
-          backend: pv
-          size: 10Gi
-components:
-  dashboard:
-    dsc:
-      # The standard dashboard stays; the chart defaults it to Removed once maasPortal is set.
-      standard:
-        managementState: Managed
-      maasPortal:
-        managementState: Managed
-  kserve:
-    gateway:
-      annotations:
-        grid.opendatahub.io/serving: >-
-          {
-            "networkName": "grid",
-            "namespace": "redhat-ai-grid",
-            "serviceAccount": "grid-model-client",
-            "tokenSecret": "grid-model-client-token",
-            "publishMetrics": true
-          }
-      spec:
-        # A platform-issued serving cert on the https listener, as RHOAI's own
-        # gateway has: the grid gateway dials this gateway for every local model.
-        infrastructure:
-          annotations:
-            service.beta.openshift.io/serving-cert-secret-name: openshift-ai-inference-service-tls
-            # Envoy statistics Istio's default matcher drops: the EPP's ext_proc, Authorino's ext_authz,
-            # downstream request and connection counters, upstream pools, wasm. The performance campaign
-            # reads them (ServiceMonitors in openshift-ingress scrape the gateway pods).
-            proxy.istio.io/config: |
-                  proxyStatsMatcher:
-                    inclusionRegexps:
-                      - ".*ext_proc.*"
-                      - ".*ext_authz.*"
-                      - ".*ratelimit.*"
-                      - ".*wasm.*"
-                      - "http\\..*\\.downstream_rq_.*"
-                      - "http\\..*\\.downstream_cx_.*"
-                      - "listener\\..*\\.downstream_cx_.*"
-                      - "cluster\\..*\\.upstream_(rq|cx)_.*"
-                      - "server\\..*"
-                      - "overload\\..*"
-                      - "cluster\\..*\\.outlier_detection\\..*"
-        listeners:
-          - name: http
-            port: 80
-            # hostname: <HOSTNAME> # Uncomment this line to use a specific hostname.
-            protocol: HTTP
-            allowedRoutes:
-              namespaces:
-                # AI project namespaces opt in with grid.opendatahub.io/allowed=true.
-                from: Selector
-                selector:
-                  matchLabels:
-                    grid.opendatahub.io/allowed: "true"
-
-          - name: https
-            port: 443
-            # hostname: <HOSTNAME> # Uncomment this line to use a specific hostname.
-            protocol: HTTPS
-            tls:
-              mode: Terminate
-              certificateRefs:
-                - name: openshift-ai-inference-service-tls
-            allowedRoutes:
-              namespaces:
-                # AI project namespaces opt in with grid.opendatahub.io/allowed=true.
-                from: Selector
-                selector:
-                  matchLabels:
-                    grid.opendatahub.io/allowed: "true"
-  aigateway:
-    dsc:
-      aiGrid:
-        managementState: Managed
-    modelsAsAService:
-      gateway:
-        spec:
-          infrastructure:
-            annotations:
-              # Same Envoy statistics for the MaaS gateway: payload-processing ext_proc, Authorino
-              # ext_authz, the Kuadrant wasm shim and Limitador rate limiting, downstream and upstream counters.
-              proxy.istio.io/config: |
-                    proxyStatsMatcher:
-                      inclusionRegexps:
-                        - ".*ext_proc.*"
-                        - ".*ext_authz.*"
-                        - ".*ratelimit.*"
-                        - ".*wasm.*"
-                        - "http\\..*\\.downstream_rq_.*"
-                        - "http\\..*\\.downstream_cx_.*"
-                        - "listener\\..*\\.downstream_cx_.*"
-                        - "cluster\\..*\\.upstream_(rq|cx)_.*"
-                        - "server\\..*"
-                        - "overload\\..*"
-                        - "cluster\\..*\\.outlier_detection\\..*"
-          listeners:
-            - name: http
-              port: 80
-              # hostname: <HOSTNAME> # Uncomment this line to use a specific hostname.
-              protocol: HTTP
-              allowedRoutes:
-                namespaces:
-                  # The following is an example of how to restrict the namespaces to the interested ones.
-                  from: Selector
-                  selector:
-                    matchExpressions:
-                      - key: kubernetes.io/metadata.name
-                        operator: In
-                        values:
-                          - openshift-ingress
-                          # MaaS models in a Grid are represented by ExternalModel resources pointing to the Grid GW.
-                          - models-as-a-service
-                          - redhat-ai-gateway-infra
-
-            - name: https
-              port: 443
-              # hostname: <HOSTNAME> # Uncomment this line to use a specific hostname.
-              protocol: HTTPS
-              allowedRoutes:
-                namespaces:
-                  # The following is an example of how to restrict the namespaces to the interested ones.
-                  from: Selector
-                  selector:
-                    matchExpressions:
-                      - key: kubernetes.io/metadata.name
-                        operator: In
-                        values:
-                          - openshift-ingress
-                          # MaaS models in a Grid are represented by ExternalModel resources pointing to the Grid GW.
-                          - models-as-a-service
-                          - redhat-ai-gateway-infra
-
-# Grid v0.3.0-rc.3 runtimes from the release on ghcr, until RHDS ships rc.3.
-# The subcharts otherwise fall back to ghcr.io/praxis-proxy. Keep these pins
-# aligned with the Grid operator payload when updating the catalog:
-#   oc -n redhat-ods-operator get deploy rhods-operator -o json | jq -r '
-#     .spec.template.spec.containers[].env[] | select(.name|test("PRAXIS_AI_GRID"))'
+  nvidiaGPUOperator:
+    enabled: false
+# The payload's Grid runtimes. Argo renders these charts, not the operator, so
+# they name the images the operator's payload ships.
 global:
   relatedImages:
     - name: RELATED_IMAGE_ODH_PRAXIS_AI_GRID_GATEWAY_IMAGE
-      value: ghcr.io/praxis-proxy/grid-gateway@sha256:0010bc2167b5b0e13c533d6c789092566dd5f764661626b0e4dd05d37b94849b
-    - name: RELATED_IMAGE_ODH_PRAXIS_AI_GRID_ENROLLMENT_IMAGE
-      value: ghcr.io/praxis-proxy/grid-enrollment@sha256:cdb9c6f5d9ccca8f87920a19db6ba3b38faea3f0dc4153bacd3e34a00c0ab749
-    # The bundle publishes this one as RELATED_IMAGE_POSTGRESQL_16_IMAGE.
-    - name: RELATED_IMAGE_ODH_PRAXIS_AI_GRID_POSTGRES_IMAGE
-      value: registry.redhat.io/rhel9/postgresql-16@sha256:435ba5c1d3f686cf8a45ae525b4d169ced6b33753bcfab99a1498bd9e6e99817
+      value: registry.redhat.io/rhoai/odh-praxis-ai-grid-gateway-rhel9@sha256:fa06fe6911c549583c8870c8ac5cae094108c40889357e273f313888b71d6633
 
-# Vendored by odh-gitops, so values rather than a second Application. Renders
-# into redhat-ai-grid, which is the platform install's grid namespace.
-grid-enrollment:
-  # enabled is set per cluster by the ApplicationSet: the hub runs enrollment,
-  # spokes must not hold the Grid CA signing key.
-  # No Route: members get their identity from ACM delivery, not from this service.
-  route:
-    enabled: false
-  serving:
-    extraDnsNames:
-      - grid-enrollment.redhat-ai-grid.svc.clusterset.local
-  enrollment:
-    # Named explicitly: the chart would derive redhat-ai-grid-invites, which
-    # matches ^redhat-.* and ROSA refuses to let Argo create it. Naming it means
-    # the chart does not create it either, so it comes from manifests/.
-    inviteSecrets:
-      namespace: grid-enrollment-invites
-    authz: kube
-    service:
-      type: ClusterIP
-  db:
-    type: builtin
-    builtin:
-      pvcAnnotations:
-        argocd.argoproj.io/sync-options: Prune=false,Delete=false
-  # No invites: the ca-bootstrap and invite-admission templates both emit the
-  # same ValidatingAdmissionPolicy once invites is set, and Argo refuses a
-  # duplicated resource. A spoke has no enrollment configuration to redeem an
-  # invite with anyway.
-  hubSite:
-    name: local-cluster
-    namespace: redhat-ai-grid
-    identitySecretName: grid-site-identity
-    caSecretName: grid-ca
-    swimKeySecretName: grid-swim-key
-    seedSecretName: grid-reserved-seeds
-
-# The enrollment policy delivers GridNetwork; the operator publishes its local
-# GridSite from its identity. flavor is explicit because the chart only infers
-# grid-gateway from a repository name ending in /grid-gateway, which the RHOAI
-# image does not.
-praxis-gateway:
+# The ingress profile enrols the consumer gateway's TLS metrics listener in RHOAI's collector;
+# this does the same for the provider gateway. The listener needs the NetworkPolicy, whose
+# peers the ApplicationSet sets per site.
+praxis-provider-gateway:
+  networkPolicy:
+    enabled: true
   metricsListener:
     fromNamespaces:
       - redhat-ods-monitoring
@@ -254,47 +74,3 @@ praxis-gateway:
     serviceMonitor:
       labels:
         monitoring.opendatahub.io/scrape: "true"
-  enabled: true
-  image:
-    flavor: grid-gateway
-  grid:
-    networkName: grid
-    # siteName comes from the ApplicationSet, one per cluster.
-  praxisConfig:
-    source: render
-    render:
-      # MaaS authenticates the caller.
-      auth:
-        mode: none
-      # No backends: the gateway dials what the operator derives from the
-      # InferenceProviders and GridSites of this site, through the serving
-      # ConfigMap's dial file. Local models are reached through the RHOAI
-      # serving gateway, so the EPP picks the pod.
-      gridServing:
-        enabled: true
-        networkName: grid
-        # Explicit: the default follows fullnameOverride.
-        gatewayRefName: grid-gateway
-  gridIdentity:
-    tlsSecretName: grid-site-identity
-    caSecretName: grid-ca
-    mountPath: /etc/praxis/tls
-  listenerTls:
-    secretName: grid-gateway-listener-tls
-  # The model-client token a local dial sends to the serving gateway.
-  providerCredentials:
-    - secretName: grid-model-client-token
-  # The service CA (rhoai-prerequisites copies it into this Secret) verifies the
-  # serving gateway's cert on a local dial; remote hops carry the grid CA.
-  upstreamCA:
-    secretName: openshift-service-ca
-    key: ca.crt
-  port:
-    containerPort: 8443
-  service:
-    enabled: true
-    type: ClusterIP
-    # What inference.opendatahub.io/port already names.
-    port: 443
-    annotations:
-      service.beta.openshift.io/serving-cert-secret-name: grid-gateway-listener-tls

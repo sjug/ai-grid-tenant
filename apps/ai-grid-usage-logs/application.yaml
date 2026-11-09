@@ -1,0 +1,66 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  # The hub's store for AI Grid MaaS usage logs. Sites forward their records
+  # here over OTLP; nothing on the hub runs RHOAI.
+  #
+  # Three sources, following apps/grid-bootstrap: this repository for the values
+  # and for the Loki operator prerequisite, and odh-gitops for the chart.
+  name: ai-grid-usage-logs
+  namespace: openshift-gitops
+  annotations:
+    # After ACM, so the spokePolicy's Placement and PlacementBinding have their
+    # CRDs, and after the Loki operator Subscription in this app's own wave 0.
+    argocd.argoproj.io/sync-wave: "4"
+spec:
+  project: default
+  sources:
+    - repoURL: https://github.com/sjug/ai-grid-tenant.git
+      targetRevision: main
+      ref: values
+
+    # The Loki operator. Not in the chart: the subchart renders the LokiStack,
+    # while the operator is the parent chart's dependencies.loki, and a
+    # dedicated hub runs no RHOAI to bring it.
+    - repoURL: https://github.com/sjug/ai-grid-tenant.git
+      targetRevision: main
+      path: apps/ai-grid-usage-logs/manifests
+
+    # The subchart, not the parent: with skipCrdCheck the parent also renders a
+    # DSCInitialization and a DataScienceCluster, which would install RHOAI
+    # configuration on the hub. Targeting the subchart renders only the store.
+    # Its values are un-nested for the same reason.
+    #
+    # main, not the feature-ai-grid branch the sibling apps track: that branch
+    # predates this subchart and carries 5 of its 15 files -- no
+    # store/lokistack.yaml, no store/object-storage.yaml, no values.schema.json
+    # -- so it cannot render the store at all. Retarget once it catches up.
+    - repoURL: https://github.com/opendatahub-io/odh-gitops.git
+      targetRevision: main
+      path: charts/rhai-on-openshift-chart/charts/ai-grid-o11y-hub
+      helm:
+        releaseName: ai-grid-usage-logs
+        valueFiles:
+          - $values/apps/ai-grid-usage-logs/values.yaml
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: ai-grid-o11y
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    retry:
+      refresh: true
+      # The store's CRs wait on the Loki operator's CRDs, and the policy's on
+      # ACM's. Argo retrying is what replaces the documented two-pass install.
+      limit: 20
+      backoff:
+        duration: 30s
+        factor: 2
+        maxDuration: 10m
+    syncOptions:
+      # The chart creates ai-grid-o11y itself. ai-grid-policies is left to
+      # apps/ai-grid-policies, which already owns it -- hence
+      # spokePolicy.createNamespace=false in values.yaml.
+      - CreateNamespace=false
+      - SkipDryRunOnMissingResource=true

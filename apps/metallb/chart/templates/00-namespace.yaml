@@ -1,19 +1,23 @@
+{{- if .Values.operator.install }}
 apiVersion: v1
 kind: Namespace
 metadata:
-  name: metallb-system
+  name: {{ .Values.operator.namespace }}
   annotations:
+    # Never pruned: switching operator.install or instance.create off hands the object over, it does not remove it.
+    argocd.argoproj.io/sync-options: Prune=false
     argocd.argoproj.io/sync-wave: "0"
 ---
 apiVersion: operators.coreos.com/v1
 kind: OperatorGroup
 metadata:
   name: metallb-operator
-  namespace: metallb-system
+  namespace: {{ .Values.operator.namespace }}
   annotations:
+    # Never pruned: switching operator.install or instance.create off hands the object over, it does not remove it.
+    argocd.argoproj.io/sync-options: Prune=false
     argocd.argoproj.io/sync-wave: "0"
-# The MetalLB operator supports only the AllNamespaces install mode; an
-# OperatorGroup that targets its own namespace leaves the CSV Failed with
-# UnsupportedOperatorGroup. No targetNamespaces selects AllNamespaces.
+# The operator supports only AllNamespaces: no targetNamespaces.
 spec:
   upgradeStrategy: Default
+{{- end }}

@@ -15,7 +15,7 @@ manifests:
 | Component | From |
 |---|---|
 | External Secrets Operator | `apps/external-secrets/manifests` |
-| `maas-db` primary | `apps/maas-db/local-cluster`, without its ServiceExport |
+| `maas-db` primary | `apps/maas-db/primary`, without its ServiceExport |
 | Keycloak | `apps/keycloak`, without the hub's public-URL Policy |
 | Limitador's Redis | `apps/limitador-redis/manifests`, without its ServiceExport |
 

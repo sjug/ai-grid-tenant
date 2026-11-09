@@ -1,5 +1,5 @@
 apiVersion: v2
 name: metallb
-description: MetalLB operator and one L2 address pool for a bare metal AI Grid site
+description: MetalLB operator and address pools for a site without a load-balancer provider
 type: application
 version: 0.1.0

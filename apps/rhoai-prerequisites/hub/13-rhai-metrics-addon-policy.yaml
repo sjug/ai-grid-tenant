@@ -1,4 +1,6 @@
-# Register the existing RHOAI exporter job without taking ownership of the addon's other configs.
+# Register the existing RHOAI exporter job, and the GPU metric the AI Grid dashboards need
+# beyond ACM's default list (ai-grid-o11y/manifests/scrapeconfig-dashboard-platform-metrics.yaml),
+# without taking ownership of the addon's other configs.
 # Removing this musthave policy does not withdraw the tuple; deregistration is a separate migration.
 apiVersion: cluster.open-cluster-management.io/v1beta1
 kind: Placement
@@ -52,6 +54,10 @@ spec:
                             resource: scrapeconfigs
                             namespace: open-cluster-management-observability
                             name: rhai-metrics
+                          - group: monitoring.rhobs
+                            resource: scrapeconfigs
+                            namespace: open-cluster-management-observability
+                            name: ai-grid-dashboard-platform-metrics
 ---
 apiVersion: policy.open-cluster-management.io/v1
 kind: PlacementBinding

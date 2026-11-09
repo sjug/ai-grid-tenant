@@ -1,0 +1,29 @@
+{{- if ne (.Values.role | default "") "inference" }}
+{{- $gateway := .Values.components.aigateway.modelsAsAService.gateway }}
+{{- $hostnamePrefix := index $gateway.annotations "ai-grid/maas-gateway-hostname-prefix" }}
+{{- if not $hostnamePrefix }}{{ fail "components.aigateway.modelsAsAService.gateway.annotations.ai-grid/maas-gateway-hostname-prefix is required" }}{{ end }}
+apiVersion: policy.open-cluster-management.io/v1
+kind: ConfigurationPolicy
+metadata:
+  name: rhoai-maas-gateway-hostname
+  namespace: {{ required "clusterNamespace is required" .Values.clusterNamespace }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  remediationAction: enforce
+  severity: high
+  object-templates:
+    - complianceType: musthave
+      objectDefinition:
+        apiVersion: gateway.networking.k8s.io/v1
+        kind: Gateway
+        metadata:
+          name: {{ $gateway.name }}
+          namespace: {{ $gateway.namespace }}
+        spec:
+          listeners:
+            - name: http
+              hostname: '{{ $hostnamePrefix }}.{{ "{{" }} (lookup "config.openshift.io/v1" "Ingress" "" "cluster").spec.domain {{ "}}" }}'
+            - name: https
+              hostname: '{{ $hostnamePrefix }}.{{ "{{" }} (lookup "config.openshift.io/v1" "Ingress" "" "cluster").spec.domain {{ "}}" }}'
+{{- end }}
