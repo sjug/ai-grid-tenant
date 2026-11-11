@@ -7,6 +7,9 @@ metadata:
   namespace: openshift-gitops
   annotations:
     argocd.argoproj.io/sync-wave: "1"
+    # This sample selects no clusters here; the lab serves vcr-smollm2.
+    # Exclude its health from acm-models without changing placement.
+    argocd.argoproj.io/ignore-healthcheck: "true"
 spec:
   clusterSets:
     - global
