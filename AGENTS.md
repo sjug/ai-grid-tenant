@@ -18,12 +18,21 @@ or untracked `kubectl apply` changes. Configuration must be repeatable across an
 placement and discovery flows and no hard-coded cluster names, contexts, endpoints, node names, or environment-specific
 values. Use documented, parameterized scripts for unavoidable runtime inputs.
 
+When a change begins managing a new custom resource kind, inspect its CRD status schema and, where available, read-only
+examples on the authorized hub or a discovered spoke. Policy-embedded `objectDefinition` resources and resources rendered
+by remote charts count as managed. Add a Lua health check to `apps/gitops-config/manifests/argocd.yaml` for every
+status-bearing kind that lacks an Argo built-in, or add a narrowly scoped, documented exception in
+`scripts/check-gitops-health-checks.sh`; remote-chart kinds absent from repository YAML must be added to that script's
+external managed-resource list. Do not use a presence-only check for a resource that exposes readiness, degradation,
+compliance, or generation state.
+
 ## Build, Validation, and Development Commands
 
 ```sh
 helm lint cluster-config/chart -f cluster-config/values.yaml -f cluster-config/cluster-admins.yaml
 helm template cluster-config/chart -f cluster-config/values.yaml -f cluster-config/cluster-admins.yaml
 bash -n bootstrap.sh docs/acm/cluster-onboarding/import-managed-cluster.sh scripts/set-tenant-repo.sh
+scripts/check-gitops-health-checks.sh
 scripts/set-tenant-repo.sh --check
 ```
 
@@ -41,8 +50,10 @@ test to an authorized operator.
 
 ## Testing Guidelines
 
-There is no automated unit-test suite. Validate YAML rendering and shell syntax locally before opening a PR. Do not make
-live changes to validate cluster-affecting work; describe intended operator validation in the PR.
+There is no automated unit-test suite. Validate YAML rendering and shell syntax locally before opening a PR. Run
+`scripts/check-gitops-health-checks.sh` whenever managed resource kinds or Argo CD health checks change. Do not make
+live changes to validate cluster-affecting work; use read-only CRD and Application inspection on the authorized hub and
+describe intended operator validation in the PR.
 
 ## Commit & Pull Request Guidelines
 

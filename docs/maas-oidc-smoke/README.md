@@ -79,12 +79,14 @@ The script:
 1. Discovers the Keycloak and MaaS Gateway endpoints from cluster resources.
 2. Authenticates the selected user through the configured identity broker.
 3. Exchanges the authorization code for an OIDC access token.
-4. Calls `/v1/me` and `/v1/subscriptions`.
-5. Creates a one-hour ephemeral API key when the user has an owner-accessible
+4. Calls `/v1/me` and `/v1/models` with the OIDC token.
+5. Calls `/v1/subscriptions`.
+6. Creates a one-hour ephemeral API key when the user has an owner-accessible
    subscription.
-6. Calls `/v1/api-keys/search` and verifies that a newly created key is listed.
-7. Asks for approval, then sends an OpenAI-compatible completion request.
-8. Asks for approval, then exhausts and verifies the selected subscription's
+7. Calls `/v1/api-keys/search` and verifies that a newly created key is listed.
+8. Calls `/v1/models` with the ephemeral API key when one was created.
+9. Asks for approval, then sends an OpenAI-compatible completion request.
+10. Asks for approval, then exhausts and verifies the selected subscription's
    finite token rate limit when it is small enough to test safely.
 
 For `alice` and `bob`, the test expects one owner-accessible subscription,

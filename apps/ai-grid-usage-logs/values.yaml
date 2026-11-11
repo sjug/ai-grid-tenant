@@ -80,14 +80,15 @@ spokePolicy:
   endpoint: '{{hub printf "https://%s/api/logs/v1/infrastructure/otlp" (index (lookup "route.openshift.io/v1" "Route" "redhat-ods-monitoring" "usage-logs").status.ingress 0).host hub}}'
 
   # Named ServiceAccount the hub templates above resolve as. Created, with its
-  # two narrowly scoped Roles, in manifests/20-hub-template-rbac.yaml.
+  # three narrowly scoped Roles, in manifests/20-hub-template-rbac.yaml.
   hubTemplateOptions:
     serviceAccountName: usage-logs-templating
 
   # The read credential: the same policy hands a spoke-side consumer — anything in
-  # redhat-ai-gateway-infra that queries the hub's store — the query endpoint and a
-  # read-only token. Same policy, so same Placement: a site gets both halves, and
-  # the consumer's namespace arrives with the spoke's own RHOAI install, so the
+  # redhat-ai-gateway-infra that queries the hub's store — the query endpoint, a
+  # read-only token, and the CA bundle that verifies the store Route's
+  # certificate. Same policy, so same Placement: a site gets all halves, and the
+  # consumer's namespace arrives with the spoke's own RHOAI install, so the
   # policy is NonCompliant there until that install runs — the same wait the
   # DSCInitialization patch has, and harmless for the same reason.
   readCredential:
@@ -100,7 +101,13 @@ spokePolicy:
     credentialSecretName: usage-logs-hub-read-credential
 
     # Defaults kept: usage-logs-loki in redhat-ai-gateway-infra on each spoke,
-    # with LOKI_READ_ENDPOINT and LOKI_READ_TOKEN as its keys.
+    # with LOKI_READ_ENDPOINT, LOKI_READ_TOKEN and LOKI_READ_CA as its keys. The
+    # CA key does not come from that Secret: it is a hub template resolved on
+    # every Policy render -- the store Route's `spec.tls.caCertificate` when the
+    # Loki operator set one, otherwise the cluster's default ingress certificate
+    # -- so it needs the templating ServiceAccount to also read the
+    # default-ingress-cert ConfigMap in openshift-config-managed (the third Role
+    # in manifests/20-hub-template-rbac.yaml).
 
   # apps/ai-grid-policies already owns this namespace. Creating it here as well
   # makes two Argo Applications claim one object, which Argo reports as a
@@ -108,19 +115,49 @@ spokePolicy:
   createNamespace: false
 
   placement:
+    # Named for what it selects. This Placement serves one Policy -- the usage-log
+    # credentials -- and the chart default `ai-grid-maas-spokes` reads like a
+    # fleet-wide selector others could bind to. Nothing else references it.
+    name: ai-grid-maas-usage-logs
+
     # This fleet binds `global`, not the chart's `default`.
     clusterSet: global
     # Same reason as createNamespace above: apps/ai-grid-policies already binds
     # global into this namespace.
     createClusterSetBinding: false
-    # Left at the chart default, ai-grid.redhat.com/maas=true: a site forwards
-    # usage logs only once labelled, which is deliberately separate from
-    # ai-grid/role. Overriding matchLabels here would ADD to the default rather
-    # than replace it, and the Placement would then match nothing.
-    excludeLocalCluster: true
+
+    # The role is the whole predicate: a site receives these credentials if it is
+    # an ingress or combined site.
+    #
+    # `null` deletes the chart default, ai-grid.redhat.com/maas=true, rather than
+    # overriding it. Helm merges maps, so leaving matchLabels out entirely would
+    # keep that requirement -- the label has to be named to remove it. Nothing
+    # else in this repository selects on it, and it is an independent boolean that
+    # nothing keeps in step with ai-grid/role, so a site could carry one and not
+    # the other in either direction.
+    #
+    # The role requirement cannot go in matchLabels: that is a map of key to a
+    # single value, so it can say `combined` but not `ingress or combined`, and an
+    # ingress-only site would be missed. Both credentials are usable on either --
+    # the writer feeds the collector that the gateway's access logs reach, and the
+    # reader is read by maas-api in redhat-ai-gateway-infra. Only an inference-only
+    # site has neither, and that namespace does not exist there, so the read
+    # credential could not be placed and this Policy would be permanently
+    # NonCompliant, which Argo's Policy health check reports as Degraded.
+    #
+    # matchLabels for equality and matchExpressions for set-based requirements is
+    # how the fleet's other Placements are written -- apps/ai-grid-spokes'
+    # ai-grid-ingress expresses this same role predicate the same way.
     matchLabels:
       ai-grid.redhat.com/maas: null
-      ai-grid/role: combined
+    matchExpressions:
+      - key: ai-grid/role
+        operator: In
+        values:
+          - ingress
+          - combined
+
+    excludeLocalCluster: true
 
   spoke:
     monitoringNamespace: redhat-ods-monitoring

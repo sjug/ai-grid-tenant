@@ -52,7 +52,7 @@ spec:
           ref: values
         # Immutable OCI snapshot from the 3.6.0 dev channel.
         - repoURL: oci://ghcr.io/opendatahub-io/odh-gitops/rhai-on-openshift-chart
-          targetRevision: 3.6.0-dev.29.1
+          targetRevision: 3.6.0-dev.32.1
           path: .
           helm:
             releaseName: rhai-on-openshift

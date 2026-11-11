@@ -556,6 +556,272 @@ spec:
                     query: >-
                       sum(rate(grid_signals_poll_total{result="ok",cluster=~"$cluster_name"}[$__rate_interval])) / (sum(rate(grid_signals_poll_total{cluster=~"$cluster_name"}[$__rate_interval])) > 0)
                     seriesNameFormat: Grid load reading fetch success rate
+      maasApiAvailability:
+        kind: Panel
+        spec:
+          display:
+            name: MaaS API availability
+            description: >-
+              Share of MaaS API scrape targets reporting as up, by cluster.
+          plugin:
+            kind: TimeSeriesChart
+            spec:
+              legend:
+                mode: list
+                position: bottom
+                values: []
+              visual:
+                areaOpacity: 0
+                connectNulls: false
+                display: line
+                lineWidth: 1.5
+              yAxis:
+                format:
+                  unit: percent-decimal
+                min: 0
+          queries:
+            - kind: TimeSeriesQuery
+              spec:
+                plugin:
+                  kind: PrometheusTimeSeriesQuery
+                  spec:
+                    datasource:
+                      kind: PrometheusDatasource
+                      name: cluster-prometheus-datasource
+                    query: avg by (cluster) (up{job="maas-api-metrics",cluster=~"$cluster_name"})
+                    seriesNameFormat: "{{cluster}}"
+      maasApiErrorRate:
+        kind: Panel
+        spec:
+          display:
+            name: MaaS API error rate
+            description: >-
+              Share of user-facing MaaS API requests that returned a server
+              error or timed out, by cluster. Health probes are excluded; a
+              zero denominator is treated as zero errors.
+          plugin:
+            kind: TimeSeriesChart
+            spec:
+              legend:
+                mode: list
+                position: bottom
+                values: []
+              visual:
+                areaOpacity: 0
+                connectNulls: false
+                display: line
+                lineWidth: 1.5
+              yAxis:
+                format:
+                  unit: percent-decimal
+                min: 0
+          queries:
+            - kind: TimeSeriesQuery
+              spec:
+                plugin:
+                  kind: PrometheusTimeSeriesQuery
+                  spec:
+                    datasource:
+                      kind: PrometheusDatasource
+                      name: cluster-prometheus-datasource
+                    query: >-
+                      sum by (cluster) (rate(maas_api_http_requests_total{route!="/health",status=~"5..|408",cluster=~"$cluster_name"}[$__rate_interval])) / clamp_min(sum by (cluster) (rate(maas_api_http_requests_total{route!="/health",cluster=~"$cluster_name"}[$__rate_interval])), 1e-9)
+                    seriesNameFormat: "{{cluster}}"
+      maasDatabaseLagHealth:
+        kind: Panel
+        spec:
+          display:
+            name: MaaS DB replication lag
+            description: >-
+              Replica lag as a share of the MaaS API's exported critical
+              threshold, by cluster. At or above 100%, reads avoid the lagging
+              replica.
+          plugin:
+            kind: TimeSeriesChart
+            spec:
+              legend:
+                mode: list
+                position: bottom
+                values: []
+              visual:
+                areaOpacity: 0
+                connectNulls: false
+                display: line
+                lineWidth: 1.5
+              yAxis:
+                format:
+                  unit: percent-decimal
+                min: 0
+          queries:
+            - kind: TimeSeriesQuery
+              spec:
+                plugin:
+                  kind: PrometheusTimeSeriesQuery
+                  spec:
+                    datasource:
+                      kind: PrometheusDatasource
+                      name: cluster-prometheus-datasource
+                    query: >-
+                      max by (cluster) (maas_api_database_replication_lag_seconds{cluster=~"$cluster_name"} / maas_api_database_replication_lag_critical_seconds{cluster=~"$cluster_name"})
+                    seriesNameFormat: "{{cluster}}"
+      maasDatabaseReadFallbacks:
+        kind: Panel
+        spec:
+          display:
+            name: MaaS DB read fallbacks
+            description: >-
+              Reads per second that the MaaS API served from the primary
+              instead of a replica, by cluster. A sustained non-zero rate is
+              unhealthy.
+          plugin:
+            kind: TimeSeriesChart
+            spec:
+              legend:
+                mode: list
+                position: bottom
+                values: []
+              visual:
+                areaOpacity: 0
+                connectNulls: false
+                display: line
+                lineWidth: 1.5
+              yAxis:
+                format:
+                  unit: decimal
+                min: 0
+          queries:
+            - kind: TimeSeriesQuery
+              spec:
+                plugin:
+                  kind: PrometheusTimeSeriesQuery
+                  spec:
+                    datasource:
+                      kind: PrometheusDatasource
+                      name: cluster-prometheus-datasource
+                    query: >-
+                      sum by (cluster) (rate(maas_api_database_read_fallbacks_total{cluster=~"$cluster_name"}[$__rate_interval]))
+                    seriesNameFormat: "{{cluster}}"
+      maasApiRequestLatency:
+        kind: Panel
+        spec:
+          display:
+            name: MaaS API P90 request latency
+            description: >-
+              P90 latency over the last hour for user-facing MaaS API requests,
+              by cluster, before model inference. Health probes are excluded so
+              they cannot mask slower tenant operations.
+          plugin:
+            kind: TimeSeriesChart
+            spec:
+              legend:
+                mode: list
+                position: bottom
+                values: []
+              visual:
+                areaOpacity: 0
+                connectNulls: false
+                display: line
+                lineWidth: 1.5
+              yAxis:
+                format:
+                  unit: seconds
+                min: 0
+          queries:
+            - kind: TimeSeriesQuery
+              spec:
+                plugin:
+                  kind: PrometheusTimeSeriesQuery
+                  spec:
+                    datasource:
+                      kind: PrometheusDatasource
+                      name: cluster-prometheus-datasource
+                    query: >-
+                      histogram_quantile(0.90, sum by (le, cluster) (increase(maas_api_http_request_duration_seconds_bucket{route!="/health",cluster=~"$cluster_name"}[1h])))
+                    seriesNameFormat: "{{cluster}}"
+      maasControllerReconcileErrors:
+        kind: Panel
+        spec:
+          display:
+            name: MaaS controller reconciliation errors
+            description: >-
+              Reconciliation error rate for the MaaS and AI gateway controllers,
+              by cluster. Terminal errors no longer retry and need attention.
+          plugin:
+            kind: TimeSeriesChart
+            spec:
+              legend:
+                mode: list
+                position: bottom
+                values: []
+              visual:
+                areaOpacity: 0
+                connectNulls: false
+                display: line
+                lineWidth: 1.5
+              yAxis:
+                format:
+                  unit: decimal
+                min: 0
+          queries:
+            - kind: TimeSeriesQuery
+              spec:
+                plugin:
+                  kind: PrometheusTimeSeriesQuery
+                  spec:
+                    datasource:
+                      kind: PrometheusDatasource
+                      name: cluster-prometheus-datasource
+                    query: >-
+                      sum by (cluster) (rate(controller_runtime_reconcile_errors_total{job=~"maas-controller-metrics|ai-gateway-controller-metrics",cluster=~"$cluster_name"}[$__rate_interval]))
+                    seriesNameFormat: "{{cluster}} reconciliation errors"
+            - kind: TimeSeriesQuery
+              spec:
+                plugin:
+                  kind: PrometheusTimeSeriesQuery
+                  spec:
+                    datasource:
+                      kind: PrometheusDatasource
+                      name: cluster-prometheus-datasource
+                    query: >-
+                      sum by (cluster) (rate(controller_runtime_terminal_reconcile_errors_total{job=~"maas-controller-metrics|ai-gateway-controller-metrics",cluster=~"$cluster_name"}[$__rate_interval]))
+                    seriesNameFormat: "{{cluster}} terminal errors"
+      maasRequestRejections:
+        kind: Panel
+        spec:
+          display:
+            name: MaaS request rejections
+            description: >-
+              Requests per second rejected before model inference, by cluster
+              and reason. Guardrail-unavailable and no-capacity indicate service
+              health problems; the other reasons are tenant or policy limits.
+          plugin:
+            kind: TimeSeriesChart
+            spec:
+              legend:
+                mode: list
+                position: bottom
+                values: []
+              visual:
+                areaOpacity: 0
+                connectNulls: false
+                display: line
+                lineWidth: 1.5
+              yAxis:
+                format:
+                  unit: decimal
+                min: 0
+          queries:
+            - kind: TimeSeriesQuery
+              spec:
+                plugin:
+                  kind: PrometheusTimeSeriesQuery
+                  spec:
+                    datasource:
+                      kind: PrometheusDatasource
+                      name: cluster-prometheus-datasource
+                    query: >-
+                      sum by (cluster, reason) (rate(maas_request_rejections_total{cluster=~"$cluster_name"}[$__rate_interval]))
+                    seriesNameFormat: "{{cluster}} {{reason}}"
     layouts:
       # Overview Section - Stats Row
       - kind: Grid
@@ -621,6 +887,55 @@ spec:
               height: 4
               content:
                 '$ref': '#/spec/panels/gridLoadReadingFetchSuccess'
+      - kind: Grid
+        spec:
+          display:
+            title: MaaS service health
+            collapse:
+              open: true
+          items:
+            - x: 0
+              'y': 0
+              width: 12
+              height: 8
+              content:
+                '$ref': '#/spec/panels/maasApiAvailability'
+            - x: 12
+              'y': 0
+              width: 12
+              height: 8
+              content:
+                '$ref': '#/spec/panels/maasApiErrorRate'
+            - x: 0
+              'y': 8
+              width: 12
+              height: 8
+              content:
+                '$ref': '#/spec/panels/maasDatabaseLagHealth'
+            - x: 12
+              'y': 8
+              width: 12
+              height: 8
+              content:
+                '$ref': '#/spec/panels/maasDatabaseReadFallbacks'
+            - x: 0
+              'y': 16
+              width: 12
+              height: 8
+              content:
+                '$ref': '#/spec/panels/maasApiRequestLatency'
+            - x: 12
+              'y': 16
+              width: 12
+              height: 8
+              content:
+                '$ref': '#/spec/panels/maasRequestRejections'
+            - x: 0
+              'y': 24
+              width: 24
+              height: 8
+              content:
+                '$ref': '#/spec/panels/maasControllerReconcileErrors'
       # Cluster-wide usage section
       - kind: Grid
         spec:

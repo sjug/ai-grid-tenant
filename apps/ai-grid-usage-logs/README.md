@@ -28,8 +28,8 @@ What this app adds is what that one lacks:
 | | |
 |---|---|
 | `manifests/00-loki-operator.yaml` | The Loki operator. `apps/ai-grid-o11y` renders a LokiStack but ships no Subscription, and on a dedicated hub nothing else installs one — it otherwise arrives with the RHOAI chart's `dependencies.loki`, which a hub running no RHOAI never pulls in. |
-| the chart's spoke Policy | Ships the writer token, patches each site's `DSCInitialization` with the exporter configuration, and delivers the read credential — query endpoint plus read-only token — to `redhat-ai-gateway-infra` on every selected site. |
-| `manifests/20-hub-template-rbac.yaml` | Lets ACM resolve the Policy's hub templates: the ingest Route in `redhat-ods-monitoring`, and both credentials in `ai-grid-policies`. |
+| the chart's spoke Policy | Ships the writer token, patches each site's `DSCInitialization` with the exporter configuration, and delivers the read credential — query endpoint, read-only token and the CA bundle that verifies the store Route's certificate — to `redhat-ai-gateway-infra` on every selected site. |
+| `manifests/20-hub-template-rbac.yaml` | Lets ACM resolve the Policy's hub templates: the ingest Route in `redhat-ods-monitoring`, both credentials in `ai-grid-policies`, and the default ingress certificate ConfigMap in `openshift-config-managed` the read credential's CA template falls back to. |
 | `manifests/30-rbac-provision-usage-logs-tokens.yaml` | The identity both token-provisioning Jobs run as: minting tokens for the two `apps/ai-grid-o11y` ServiceAccounts, reading the store Route, and writing the credentials in `ai-grid-policies`. |
 | `manifests/31-job-provision-usage-logs-writer-token.yaml` | Mints the writer token. |
 | `manifests/32-job-provision-usage-logs-reader-token.yaml` | Mints the reader token and records the query endpoint. |
@@ -65,6 +65,18 @@ the Route's host rather than failing. The grant is `get` on the infrastructure
 tenant only — no `create` — so a leaked reader token exposes usage records but
 cannot corrupt them.
 
+The read credential also carries a CA bundle, so the spoke's consumer can
+verify the store Route's certificate — without it the query fails with
+`x509: certificate signed by unknown authority` on fleets whose Route cert is
+not publicly trusted. The CA is not minted by the Job: it is a hub template
+re-resolved on every Policy render, taking the Route's `spec.tls.caCertificate`
+when the Loki operator set one, otherwise the cluster's default ingress
+certificate from the `default-ingress-cert` ConfigMap in
+`openshift-config-managed`. That is why CA rotation needs no re-mint — the next
+Policy render picks it up — and why the templating ServiceAccount holds a third
+Role, in that namespace. Both sources empty fails template resolution and the
+Policy reports NonCompliant rather than shipping a silently-absent key.
+
 ## Verify
 
 Metadata-only, so the credential is not displayed:
@@ -98,12 +110,22 @@ ENDPOINT=$(kubectl --context <site> get secret usage-logs-loki -n redhat-ai-gate
   -o jsonpath='{.data.LOKI_READ_ENDPOINT}' | base64 -d)
 TOKEN=$(kubectl --context <site> get secret usage-logs-loki -n redhat-ai-gateway-infra \
   -o jsonpath='{.data.LOKI_READ_TOKEN}' | base64 -d)
-curl -sS -o /dev/null -w '%{http_code}\n' -H "Authorization: Bearer $TOKEN" \
+
+# and the delivered CA verifies the store Route's certificate: any HTTP status
+# (even 401) means the TLS handshake succeeded; a certificate error means it did not
+kubectl --context <site> get secret usage-logs-loki -n redhat-ai-gateway-infra \
+  -o jsonpath='{.data.LOKI_READ_CA}' | base64 -d > /tmp/usage-logs-ca.crt
+curl -sS -o /dev/null -w '%{http_code}\n' --cacert /tmp/usage-logs-ca.crt \
   "${ENDPOINT}/loki/api/v1/labels"
+
+curl -sS -o /dev/null -w '%{http_code}\n' -H "Authorization: Bearer $TOKEN" \
+  --cacert /tmp/usage-logs-ca.crt "${ENDPOINT}/loki/api/v1/labels"
 ```
 
 `200` from the labels query means the read path works end to end; `403` means
 the token is valid Kubernetes-wise but the reader identity's grant is missing.
+A TLS failure without `--cacert` that succeeds with it means the spoke consumer
+is not appending the delivered CA to its system trust pool.
 
 A record pushed at a site collector's receiver should arrive in the hub store
 with `cluster_name`, `model` and `service_name` promoted as stream labels.

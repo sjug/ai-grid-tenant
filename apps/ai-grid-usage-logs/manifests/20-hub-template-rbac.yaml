@@ -8,10 +8,12 @@
 # The propagator's own access is limited to the Policy's namespace and the target
 # ManagedCluster, which does not include the Route. `spec.hubTemplateOptions`
 # widens that to a named ServiceAccount (ACM 2.12+), and it applies to *every*
-# template in the Policy -- both credentials' `fromSecret` included. Hence two
+# template in the Policy -- both credentials' `fromSecret` included. Hence three
 # Roles: the Route in redhat-ods-monitoring, which belongs to
-# apps/ai-grid-o11y's LokiStack, and the writer and reader tokens in
-# ai-grid-policies.
+# apps/ai-grid-o11y's LokiStack; the writer and reader tokens in
+# ai-grid-policies; and the default ingress certificate ConfigMap in
+# openshift-config-managed, which the read credential's CA template falls back
+# to when the Route carries no caCertificate.
 #
 # Granted narrowly on purpose: `resourceNames` pins the single object each rule
 # needs. The unpinned `list`/`watch` rules are not padding -- ACM's template
@@ -82,8 +84,64 @@ roleRef:
   kind: Role
   name: usage-logs-templating
 ---
-# The same ServiceAccount also resolves the credential's `fromSecret`, which the
-# propagator would otherwise have reached on its own.
+# The read credential's CA template: the store Route's `spec.tls.caCertificate`
+# when the Loki operator set one, otherwise `fromConfigMap` on the cluster's
+# default ingress certificate. The eager `default` form evaluates the ConfigMap
+# read even when the Route CA wins -- an accepted wrinkle, because the
+# ConfigMap exists on any healthy OpenShift either way.
+#
+# Same shape as the Roles above: `get` pinned to the one ConfigMap needed, with
+# the unpinned `list`/`watch` ACM's template resolution requires alongside it.
+# Those cannot be resourceNames-pinned, so this reads every ConfigMap in the
+# namespace -- accepted, because openshift-config-managed holds public cluster
+# configuration, not credentials, and rhoai's ingress-clusters policy makes the
+# identical grant for the same reason.
+#
+# Wave 4: same as the other templating Roles, before the Policy in wave 5.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: usage-logs-templating
+  namespace: openshift-config-managed
+  annotations:
+    argocd.argoproj.io/sync-wave: "4"
+rules:
+  - apiGroups:
+      - ""
+    resources:
+      - configmaps
+    resourceNames:
+      - default-ingress-cert
+    verbs:
+      - get
+  - apiGroups:
+      - ""
+    resources:
+      - configmaps
+    verbs:
+      - list
+      - watch
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: usage-logs-templating
+  namespace: openshift-config-managed
+  annotations:
+    argocd.argoproj.io/sync-wave: "4"
+subjects:
+  - kind: ServiceAccount
+    name: usage-logs-templating
+    namespace: ai-grid-policies
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: usage-logs-templating
+---
+# The same ServiceAccount also resolves both credentials' `fromSecret`, which the
+# propagator would otherwise have reached on its own. The reader token joins the
+# writer's in the pinned resourceNames; both are read through the same unpinned
+# `list`/`watch` rules above, which ACM's template resolution requires anyway.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
@@ -91,10 +149,6 @@ metadata:
   namespace: ai-grid-policies
   annotations:
     argocd.argoproj.io/sync-wave: "4"
-# The same ServiceAccount also resolves both credentials' `fromSecret`, which the
-# propagator would otherwise have reached on its own. The reader token joins the
-# writer's in the pinned resourceNames; both are read through the same unpinned
-# `list`/`watch` rules above, which ACM's template resolution requires anyway.
 rules:
   - apiGroups:
       - ""

@@ -13,8 +13,9 @@ spec:
         memory: 2Gi
       limits:
         memory: 8Gi
-  # RedisReplication is intentionally omitted because the Redis operator does
-  # not currently populate a resource status for Argo to evaluate.
+  # Statusless declarative resources such as ACM PlacementBinding and MetalLB
+  # address pools rely on Argo's sync state; scripts/check-gitops-health-checks.sh
+  # documents that exception when a new custom resource is added.
   resourceHealthChecks:
     - group: postgresql.cnpg.io
       kind: Cluster
@@ -394,6 +395,82 @@ spec:
         hs.status = "Progressing"
         hs.message = "Waiting for the OpenShift Route Admitted condition"
         return hs
+    - group: argoproj.io
+      kind: ArgoCD
+      check: |
+        hs = {}
+        if obj.status == nil or obj.status.phase == nil then
+          hs.status = "Progressing"
+          hs.message = "Waiting for ArgoCD operator status"
+          return hs
+        end
+        if obj.status.phase == "Available" then
+          hs.status = "Healthy"
+          hs.message = "ArgoCD is available"
+          return hs
+        end
+        if obj.status.phase == "Unknown" then
+          hs.status = "Progressing"
+          hs.message = "ArgoCD phase is unknown"
+          return hs
+        end
+        hs.status = "Degraded"
+        hs.message = "ArgoCD phase: " .. obj.status.phase
+        return hs
+    - group: argoproj.io
+      kind: ApplicationSet
+      check: |
+        hs = {}
+        if obj.status == nil or obj.status.conditions == nil then
+          hs.status = "Progressing"
+          hs.message = "Waiting for ApplicationSet status"
+          return hs
+        end
+        local generated = false
+        local upToDate = false
+        for _, condition in ipairs(obj.status.conditions) do
+          if condition.type == "ErrorOccurred" and condition.status == "True" then
+            hs.status = "Degraded"
+            hs.message = condition.message or "ApplicationSet generation failed"
+            return hs
+          end
+          if condition.type == "ParametersGenerated" and condition.status == "True" then
+            generated = true
+          end
+          if condition.type == "ResourcesUpToDate" and condition.status == "True" then
+            upToDate = true
+          end
+        end
+        if generated and upToDate then
+          hs.status = "Healthy"
+          hs.message = "ApplicationSet resources are up to date"
+          return hs
+        end
+        hs.status = "Progressing"
+        hs.message = "Waiting for ApplicationSet resources to be up to date"
+        return hs
+    - group: argoproj.io
+      kind: Application
+      check: |
+        hs = {}
+        if obj.status == nil or obj.status.sync == nil or obj.status.health == nil then
+          hs.status = "Progressing"
+          hs.message = "Waiting for Application status"
+          return hs
+        end
+        if obj.status.health.status == "Degraded" then
+          hs.status = "Degraded"
+          hs.message = obj.status.health.message or "Application is degraded"
+          return hs
+        end
+        if obj.status.sync.status == "Synced" and obj.status.health.status == "Healthy" then
+          hs.status = "Healthy"
+          hs.message = "Application is synced and healthy"
+          return hs
+        end
+        hs.status = "Progressing"
+        hs.message = "Application sync: " .. (obj.status.sync.status or "Unknown") .. "; health: " .. (obj.status.health.status or "Unknown")
+        return hs
     - group: limitador.kuadrant.io
       kind: Limitador
       check: |
@@ -759,4 +836,788 @@ spec:
         end
         hs.status = "Progressing"
         hs.message = "Waiting for the ExternalProvider Ready condition"
+        return hs
+    - group: cluster.open-cluster-management.io
+      kind: Placement
+      check: |
+        hs = {}
+        if obj.status == nil or obj.status.conditions == nil then
+          hs.status = "Progressing"
+          hs.message = "Waiting for Placement status"
+          return hs
+        end
+        for _, condition in ipairs(obj.status.conditions) do
+          if condition.type == "PlacementMisconfigured" and condition.status == "True" then
+            hs.status = "Degraded"
+            hs.message = condition.message or "Placement is misconfigured"
+            return hs
+          end
+          if condition.type == "PlacementSatisfied" then
+            if condition.status == "True" then
+              hs.status = "Healthy"
+              hs.message = condition.message or "Placement decisions are scheduled"
+              return hs
+            elseif condition.status == "False" then
+              hs.status = "Degraded"
+              hs.message = condition.message or "Placement decisions are not scheduled"
+              return hs
+            end
+          end
+        end
+        hs.status = "Progressing"
+        hs.message = "Waiting for the PlacementSatisfied condition"
+        return hs
+    - group: cluster.open-cluster-management.io
+      kind: ManagedClusterSetBinding
+      check: |
+        hs = {}
+        if obj.status == nil or obj.status.conditions == nil then
+          hs.status = "Progressing"
+          hs.message = "Waiting for ManagedClusterSetBinding status"
+          return hs
+        end
+        for _, condition in ipairs(obj.status.conditions) do
+          if condition.type == "Bound" then
+            if condition.status == "True" then
+              hs.status = "Healthy"
+              hs.message = condition.message or "ManagedClusterSet is bound"
+              return hs
+            elseif condition.status == "False" then
+              hs.status = "Degraded"
+              hs.message = condition.message or "ManagedClusterSet is not bound"
+              return hs
+            end
+          end
+        end
+        hs.status = "Progressing"
+        hs.message = "Waiting for the ManagedClusterSetBinding Bound condition"
+        return hs
+    - group: apps.open-cluster-management.io
+      kind: GitOpsCluster
+      check: |
+        hs = {}
+        if obj.status == nil or obj.status.conditions == nil then
+          hs.status = "Progressing"
+          hs.message = "Waiting for GitOpsCluster status"
+          return hs
+        end
+        for _, condition in ipairs(obj.status.conditions) do
+          if condition.type == "Ready" then
+            if condition.status == "True" then
+              hs.status = "Healthy"
+              hs.message = condition.message or "GitOpsCluster is ready"
+              return hs
+            elseif condition.status == "False" then
+              hs.status = "Degraded"
+              hs.message = condition.message or "GitOpsCluster is not ready"
+              return hs
+            end
+          end
+        end
+        hs.status = "Progressing"
+        hs.message = "Waiting for the GitOpsCluster Ready condition"
+        return hs
+    - group: addon.open-cluster-management.io
+      kind: ClusterManagementAddOn
+      check: |
+        hs = {}
+        local progressing = false
+        local completed = false
+        local progressions = {}
+        if obj.status ~= nil and obj.status.installProgressions ~= nil then
+          progressions = obj.status.installProgressions
+        end
+        for _, progression in ipairs(progressions) do
+          for _, condition in ipairs(progression.conditions or {}) do
+            if condition.type == "Progressing" then
+              if condition.status == "True" then
+                progressing = true
+              elseif condition.status == "False" then
+                completed = true
+              end
+            end
+          end
+        end
+        if progressing then
+          hs.status = "Progressing"
+          hs.message = "ClusterManagementAddOn rollout is progressing"
+          return hs
+        end
+        if completed then
+          hs.status = "Healthy"
+          hs.message = "ClusterManagementAddOn rollout is complete"
+          return hs
+        end
+        hs.status = "Progressing"
+        hs.message = "Waiting for a ClusterManagementAddOn rollout"
+        return hs
+    - group: operator.open-cluster-management.io
+      kind: MultiClusterHub
+      check: |
+        hs = {}
+        if obj.status ~= nil and obj.status.phase ~= nil then
+          if obj.status.phase == "Running" then
+            hs.status = "Healthy"
+            hs.message = "MultiClusterHub is running"
+            return hs
+          elseif obj.status.phase == "Error" or obj.status.phase == "Failure" then
+            hs.status = "Degraded"
+            hs.message = "MultiClusterHub phase: " .. obj.status.phase
+            return hs
+          end
+        end
+        if obj.status == nil or obj.status.conditions == nil then
+          hs.status = "Progressing"
+          hs.message = "Waiting for MultiClusterHub status"
+          return hs
+        end
+        for _, condition in ipairs(obj.status.conditions) do
+          if condition.type == "Degraded" and condition.status == "True" then
+            hs.status = "Degraded"
+            hs.message = condition.message or "MultiClusterHub is degraded"
+            return hs
+          end
+          if condition.type == "Progressing" and condition.status == "True" then
+            hs.status = "Progressing"
+            hs.message = condition.message or "MultiClusterHub is progressing"
+            return hs
+          end
+          if condition.type == "Complete" and condition.status == "True" then
+            hs.status = "Healthy"
+            hs.message = condition.message or "MultiClusterHub is complete"
+            return hs
+          end
+        end
+        hs.status = "Progressing"
+        hs.message = "Waiting for the MultiClusterHub Complete condition"
+        return hs
+    - group: observability.open-cluster-management.io
+      kind: MultiClusterObservability
+      check: |
+        hs = {}
+        if obj.status == nil or obj.status.conditions == nil then
+          hs.status = "Progressing"
+          hs.message = "Waiting for MultiClusterObservability status"
+          return hs
+        end
+        for _, condition in ipairs(obj.status.conditions) do
+          if condition.type == "Ready" then
+            if condition.status == "True" then
+              hs.status = "Healthy"
+              hs.message = condition.message or "MultiClusterObservability is ready"
+              return hs
+            elseif condition.status == "False" then
+              hs.status = "Degraded"
+              hs.message = condition.message or "MultiClusterObservability is not ready"
+              return hs
+            end
+          end
+        end
+        hs.status = "Progressing"
+        hs.message = "Waiting for the MultiClusterObservability Ready condition"
+        return hs
+    - group: cert-manager.io
+      kind: Certificate
+      check: |
+        hs = {}
+        if obj.status == nil or obj.status.conditions == nil then
+          hs.status = "Progressing"
+          hs.message = "Waiting for Certificate status"
+          return hs
+        end
+        for _, condition in ipairs(obj.status.conditions) do
+          if condition.type == "Ready" then
+            if obj.metadata.generation ~= nil and condition.observedGeneration ~= nil and condition.observedGeneration < obj.metadata.generation then
+              hs.status = "Progressing"
+              hs.message = "Waiting for the current Certificate generation"
+              return hs
+            end
+            if condition.status == "True" then
+              hs.status = "Healthy"
+              hs.message = condition.message or "Certificate is ready"
+              return hs
+            elseif condition.status == "False" then
+              hs.status = "Degraded"
+              hs.message = condition.message or "Certificate is not ready"
+              return hs
+            end
+          end
+        end
+        hs.status = "Progressing"
+        hs.message = "Waiting for the Certificate Ready condition"
+        return hs
+    - group: cert-manager.io
+      kind: Issuer
+      check: |
+        hs = {}
+        if obj.status == nil or obj.status.conditions == nil then
+          hs.status = "Progressing"
+          hs.message = "Waiting for Issuer status"
+          return hs
+        end
+        for _, condition in ipairs(obj.status.conditions) do
+          if condition.type == "Ready" then
+            if obj.metadata.generation ~= nil and condition.observedGeneration ~= nil and condition.observedGeneration < obj.metadata.generation then
+              hs.status = "Progressing"
+              hs.message = "Waiting for the current Issuer generation"
+              return hs
+            end
+            if condition.status == "True" then
+              hs.status = "Healthy"
+              hs.message = condition.message or "Issuer is ready"
+              return hs
+            elseif condition.status == "False" then
+              hs.status = "Degraded"
+              hs.message = condition.message or "Issuer is not ready"
+              return hs
+            end
+          end
+        end
+        hs.status = "Progressing"
+        hs.message = "Waiting for the Issuer Ready condition"
+        return hs
+    - group: loki.grafana.com
+      kind: LokiStack
+      check: |
+        hs = {}
+        if obj.status == nil or obj.status.conditions == nil then
+          hs.status = "Progressing"
+          hs.message = "Waiting for LokiStack status"
+          return hs
+        end
+        for _, condition in ipairs(obj.status.conditions) do
+          if (condition.type == "Degraded" or condition.type == "Failed") and condition.status == "True" then
+            hs.status = "Degraded"
+            hs.message = condition.message or "LokiStack is degraded"
+            return hs
+          end
+          if condition.type == "Pending" and condition.status == "True" then
+            hs.status = "Progressing"
+            hs.message = condition.message or "LokiStack is pending"
+            return hs
+          end
+          if condition.type == "Ready" and condition.status == "True" then
+            hs.status = "Healthy"
+            hs.message = condition.message or "LokiStack is ready"
+            return hs
+          end
+        end
+        hs.status = "Progressing"
+        hs.message = "Waiting for the LokiStack Ready condition"
+        return hs
+    - group: noobaa.io
+      kind: BackingStore
+      check: |
+        hs = {}
+        if obj.status == nil or obj.status.phase == nil then
+          hs.status = "Progressing"
+          hs.message = "Waiting for BackingStore status"
+          return hs
+        end
+        if obj.status.conditions ~= nil then
+          for _, condition in ipairs(obj.status.conditions) do
+            if condition.type == "Degraded" and condition.status == "True" then
+              hs.status = "Degraded"
+              hs.message = condition.message or "BackingStore is degraded"
+              return hs
+            end
+          end
+          for _, condition in ipairs(obj.status.conditions) do
+            if condition.type == "Progressing" and condition.status == "True" then
+              hs.status = "Progressing"
+              hs.message = condition.message or ("BackingStore phase: " .. obj.status.phase)
+              return hs
+            end
+          end
+        end
+        if obj.status.phase == "Rejected" then
+          hs.status = "Degraded"
+          hs.message = "BackingStore is rejected"
+          return hs
+        end
+        if obj.status.phase == "Ready" then
+          hs.status = "Healthy"
+          hs.message = "BackingStore is ready"
+          return hs
+        end
+        hs.status = "Progressing"
+        hs.message = "BackingStore phase: " .. obj.status.phase
+        return hs
+    - group: objectbucket.io
+      kind: ObjectBucketClaim
+      check: |
+        hs = {}
+        if obj.status == nil or obj.status.phase == nil then
+          hs.status = "Progressing"
+          hs.message = "Waiting for ObjectBucketClaim status"
+          return hs
+        end
+        if obj.status.phase == "Bound" then
+          hs.status = "Healthy"
+          hs.message = "ObjectBucketClaim is bound"
+          return hs
+        end
+        if obj.status.phase == "Failed" or obj.status.phase == "Error" then
+          hs.status = "Degraded"
+          hs.message = "ObjectBucketClaim phase: " .. obj.status.phase
+          return hs
+        end
+        hs.status = "Progressing"
+        hs.message = "ObjectBucketClaim phase: " .. obj.status.phase
+        return hs
+    - group: ocs.openshift.io
+      kind: StorageCluster
+      check: |
+        hs = {}
+        if obj.status ~= nil and obj.status.phase ~= nil then
+          if obj.status.phase == "Ready" then
+            hs.status = "Healthy"
+            hs.message = "StorageCluster is ready"
+            return hs
+          elseif obj.status.phase == "Error" then
+            hs.status = "Degraded"
+            hs.message = "StorageCluster phase: " .. obj.status.phase
+            return hs
+          end
+        end
+        if obj.status == nil or obj.status.conditions == nil then
+          hs.status = "Progressing"
+          hs.message = "Waiting for StorageCluster status"
+          return hs
+        end
+        for _, condition in ipairs(obj.status.conditions) do
+          if condition.type == "Degraded" and condition.status == "True" then
+            hs.status = "Degraded"
+            hs.message = condition.message or "StorageCluster is degraded"
+            return hs
+          end
+          if condition.type == "Progressing" and condition.status == "True" then
+            hs.status = "Progressing"
+            hs.message = condition.message or "StorageCluster is progressing"
+            return hs
+          end
+          if condition.type == "Available" and condition.status == "True" then
+            hs.status = "Healthy"
+            hs.message = condition.message or "StorageCluster is available"
+            return hs
+          end
+        end
+        hs.status = "Progressing"
+        hs.message = "Waiting for the StorageCluster Available condition"
+        return hs
+    - group: operators.coreos.com
+      kind: CatalogSource
+      check: |
+        hs = {}
+        if obj.status == nil or obj.status.connectionState == nil or obj.status.connectionState.lastObservedState == nil then
+          hs.status = "Progressing"
+          hs.message = "Waiting for CatalogSource connection status"
+          return hs
+        end
+        local state = obj.status.connectionState.lastObservedState
+        if state == "READY" then
+          hs.status = "Healthy"
+          hs.message = "CatalogSource registry connection is ready"
+          return hs
+        end
+        if state == "CONNECTING" or state == "TRANSIENT_FAILURE" then
+          hs.status = "Progressing"
+          hs.message = "CatalogSource connection state: " .. state
+          return hs
+        end
+        hs.status = "Degraded"
+        hs.message = "CatalogSource connection state: " .. state
+        return hs
+    - group: operators.coreos.com
+      kind: OperatorGroup
+      check: |
+        hs = {}
+        if obj.status ~= nil and obj.status.conditions ~= nil then
+          for _, condition in ipairs(obj.status.conditions) do
+            if condition.status == "True" and (condition.type == "NotSatisfiable" or condition.type == "NotSatisfactory") then
+              hs.status = "Degraded"
+              hs.message = condition.message or "OperatorGroup is not satisfiable"
+              return hs
+            end
+          end
+        end
+        hs.status = "Healthy"
+        hs.message = "OperatorGroup is accepted"
+        return hs
+    - group: perses.dev
+      kind: PersesDashboard
+      check: |
+        hs = {}
+        if obj.status == nil or obj.status.conditions == nil then
+          hs.status = "Progressing"
+          hs.message = "Waiting for PersesDashboard status"
+          return hs
+        end
+        for _, condition in ipairs(obj.status.conditions) do
+          if condition.type == "Degraded" and condition.status == "True" then
+            hs.status = "Degraded"
+            hs.message = condition.message or "PersesDashboard is degraded"
+            return hs
+          end
+          if condition.type == "Available" then
+            if condition.status == "True" then
+              hs.status = "Healthy"
+              hs.message = condition.message or "PersesDashboard is available"
+              return hs
+            elseif condition.status == "False" then
+              hs.status = "Degraded"
+              hs.message = condition.message or "PersesDashboard is not available"
+              return hs
+            end
+          end
+        end
+        hs.status = "Progressing"
+        hs.message = "Waiting for the PersesDashboard Available condition"
+        return hs
+    - group: perses.dev
+      kind: PersesDatasource
+      check: |
+        hs = {}
+        if obj.status == nil or obj.status.conditions == nil then
+          hs.status = "Progressing"
+          hs.message = "Waiting for PersesDatasource status"
+          return hs
+        end
+        for _, condition in ipairs(obj.status.conditions) do
+          if condition.type == "Degraded" and condition.status == "True" then
+            hs.status = "Degraded"
+            hs.message = condition.message or "PersesDatasource is degraded"
+            return hs
+          end
+          if condition.type == "Available" then
+            if condition.status == "True" then
+              hs.status = "Healthy"
+              hs.message = condition.message or "PersesDatasource is available"
+              return hs
+            elseif condition.status == "False" then
+              hs.status = "Degraded"
+              hs.message = condition.message or "PersesDatasource is not available"
+              return hs
+            end
+          end
+        end
+        hs.status = "Progressing"
+        hs.message = "Waiting for the PersesDatasource Available condition"
+        return hs
+    - group: policy.open-cluster-management.io
+      kind: ConfigurationPolicy
+      check: |
+        hs = {}
+        if obj.status == nil or obj.status.compliant == nil then
+          hs.status = "Progressing"
+          hs.message = "Waiting for ConfigurationPolicy compliance"
+          return hs
+        end
+        if obj.metadata.generation ~= nil and obj.status.lastEvaluatedGeneration ~= nil and obj.status.lastEvaluatedGeneration < obj.metadata.generation then
+          hs.status = "Progressing"
+          hs.message = "Waiting for the current ConfigurationPolicy generation"
+          return hs
+        end
+        if obj.status.compliant == "Compliant" then
+          hs.status = "Healthy"
+          hs.message = "ConfigurationPolicy is compliant"
+          return hs
+        end
+        if obj.status.compliant == "NonCompliant" then
+          hs.status = "Degraded"
+          hs.message = "ConfigurationPolicy is non-compliant"
+          return hs
+        end
+        hs.status = "Progressing"
+        hs.message = "ConfigurationPolicy compliance: " .. obj.status.compliant
+        return hs
+    - group: redis.redis.opstreelabs.in
+      kind: RedisReplication
+      check: |
+        hs = {}
+        if obj.status == nil or obj.status.connectionInfo == nil or obj.status.masterNode == nil then
+          hs.status = "Progressing"
+          hs.message = "Waiting for Redis replication topology status"
+          return hs
+        end
+        hs.status = "Healthy"
+        hs.message = "Redis replication topology is available"
+        return hs
+    - group: apiextensions.k8s.io
+      kind: CustomResourceDefinition
+      check: |
+        hs = {}
+        if obj.status == nil or obj.status.conditions == nil then
+          hs.status = "Progressing"
+          hs.message = "Waiting for CustomResourceDefinition status"
+          return hs
+        end
+        local established = nil
+        local namesAccepted = nil
+        local message = "Waiting for the CustomResourceDefinition to be established"
+        for _, condition in ipairs(obj.status.conditions) do
+          if condition.type == "Established" then
+            established = condition.status == "True"
+            message = condition.message or message
+          elseif condition.type == "NamesAccepted" then
+            namesAccepted = condition.status == "True"
+            message = condition.message or message
+          end
+        end
+        if established == false or namesAccepted == false then
+          hs.status = "Degraded"
+          hs.message = message
+          return hs
+        end
+        if established and namesAccepted then
+          hs.status = "Healthy"
+          hs.message = message
+          return hs
+        end
+        hs.status = "Progressing"
+        hs.message = message
+        return hs
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      check: |
+        hs = {}
+        if obj.status == nil or obj.status.conditions == nil then
+          hs.status = "Progressing"
+          hs.message = "Waiting for Gateway status"
+          return hs
+        end
+        local accepted = nil
+        local programmed = nil
+        for _, condition in ipairs(obj.status.conditions) do
+          if condition.type == "Accepted" then
+            accepted = condition.status == "True"
+            if condition.status == "False" then
+              hs.status = "Degraded"
+              hs.message = condition.message or "Gateway is not accepted"
+              return hs
+            end
+          elseif condition.type == "Programmed" then
+            programmed = condition.status == "True"
+          end
+        end
+        if accepted and programmed then
+          hs.status = "Healthy"
+          hs.message = "Gateway is accepted and programmed"
+          return hs
+        end
+        hs.status = "Progressing"
+        hs.message = "Waiting for the Gateway to be accepted and programmed"
+        return hs
+    - group: gateway.networking.k8s.io
+      kind: GatewayClass
+      check: |
+        hs = {}
+        if obj.status == nil or obj.status.conditions == nil then
+          hs.status = "Progressing"
+          hs.message = "Waiting for GatewayClass status"
+          return hs
+        end
+        for _, condition in ipairs(obj.status.conditions) do
+          if condition.type == "Accepted" then
+            if condition.status == "True" then
+              hs.status = "Healthy"
+              hs.message = condition.message or "GatewayClass is accepted"
+              return hs
+            elseif condition.status == "False" then
+              hs.status = "Degraded"
+              hs.message = condition.message or "GatewayClass is not accepted"
+              return hs
+            end
+          end
+        end
+        hs.status = "Progressing"
+        hs.message = "Waiting for the GatewayClass Accepted condition"
+        return hs
+    - group: maas.opendatahub.io
+      kind: AITenant
+      check: |
+        hs = {}
+        if obj.status == nil or (obj.status.conditions == nil and obj.status.phase == nil) then
+          hs.status = "Progressing"
+          hs.message = "Waiting for AITenant status"
+          return hs
+        end
+        if obj.status.phase == "Degraded" or obj.status.phase == "Failed" then
+          hs.status = "Degraded"
+          hs.message = "AITenant phase: " .. obj.status.phase
+          return hs
+        end
+        if obj.status.phase == "Pending" then
+          hs.status = "Progressing"
+          hs.message = "AITenant is pending"
+          return hs
+        end
+        for _, condition in ipairs(obj.status.conditions or {}) do
+          if condition.type == "Ready" then
+            if condition.status == "True" then
+              hs.status = "Healthy"
+              hs.message = condition.message or "AITenant is ready"
+              return hs
+            elseif condition.status == "False" then
+              hs.status = "Degraded"
+              hs.message = condition.message or "AITenant is not ready"
+              return hs
+            end
+          end
+        end
+        if obj.status.phase == "Active" then
+          hs.status = "Healthy"
+          hs.message = "AITenant is active"
+          return hs
+        end
+        hs.status = "Progressing"
+        hs.message = "Waiting for the AITenant Ready condition"
+        return hs
+    - group: operator.authorino.kuadrant.io
+      kind: Authorino
+      check: |
+        hs = {}
+        if obj.status == nil or obj.status.conditions == nil then
+          hs.status = "Progressing"
+          hs.message = "Waiting for Authorino status"
+          return hs
+        end
+        for _, condition in ipairs(obj.status.conditions) do
+          if condition.type == "Ready" then
+            if condition.status == "True" then
+              hs.status = "Healthy"
+              hs.message = condition.message or "Authorino is ready"
+              return hs
+            elseif condition.status == "False" then
+              hs.status = "Degraded"
+              hs.message = condition.message or "Authorino is not ready"
+              return hs
+            end
+          end
+        end
+        hs.status = "Progressing"
+        hs.message = "Waiting for the Authorino Ready condition"
+        return hs
+    - group: dscinitialization.opendatahub.io
+      kind: DSCInitialization
+      check: |
+        hs = {}
+        if obj.status == nil or obj.status.conditions == nil then
+          hs.status = "Progressing"
+          hs.message = "Waiting for DSCInitialization status"
+          return hs
+        end
+        if obj.status.phase == "Error" or obj.status.errorMessage ~= nil then
+          hs.status = "Degraded"
+          hs.message = obj.status.errorMessage or "DSCInitialization reconciliation failed"
+          return hs
+        end
+        for _, condition in ipairs(obj.status.conditions) do
+          if condition.type == "Degraded" and condition.status == "True" then
+            hs.status = "Degraded"
+            hs.message = condition.message or "DSCInitialization is degraded"
+            return hs
+          end
+          if condition.type == "Progressing" and condition.status == "True" then
+            hs.status = "Progressing"
+            hs.message = condition.message or "DSCInitialization is progressing"
+            return hs
+          end
+          if condition.type == "Ready" and condition.status == "True" then
+            hs.status = "Healthy"
+            hs.message = condition.message or "DSCInitialization is ready"
+            return hs
+          end
+        end
+        hs.status = "Progressing"
+        hs.message = "Waiting for the DSCInitialization Ready condition"
+        return hs
+    - group: kuadrant.io
+      kind: Kuadrant
+      check: |
+        hs = {}
+        if obj.status == nil or obj.status.conditions == nil then
+          hs.status = "Progressing"
+          hs.message = "Waiting for Kuadrant status"
+          return hs
+        end
+        for _, condition in ipairs(obj.status.conditions) do
+          if condition.type == "Ready" then
+            if condition.status == "True" then
+              hs.status = "Healthy"
+              hs.message = condition.message or "Kuadrant is ready"
+              return hs
+            elseif condition.status == "False" then
+              hs.status = "Degraded"
+              hs.message = condition.message or "Kuadrant is not ready"
+              return hs
+            end
+          end
+        end
+        hs.status = "Progressing"
+        hs.message = "Waiting for the Kuadrant Ready condition"
+        return hs
+    - group: operator.openshift.io
+      kind: LeaderWorkerSetOperator
+      check: |
+        hs = {}
+        if obj.status == nil or obj.status.conditions == nil then
+          hs.status = "Progressing"
+          hs.message = "Waiting for LeaderWorkerSetOperator status"
+          return hs
+        end
+        for _, condition in ipairs(obj.status.conditions) do
+          if condition.type == "Degraded" and condition.status == "True" then
+            hs.status = "Degraded"
+            hs.message = condition.message or "LeaderWorkerSetOperator is degraded"
+            return hs
+          end
+          if condition.type == "Available" and condition.status == "True" then
+            hs.status = "Healthy"
+            hs.message = condition.message or "LeaderWorkerSetOperator is available"
+            return hs
+          end
+        end
+        hs.status = "Progressing"
+        hs.message = "Waiting for the LeaderWorkerSetOperator Available condition"
+        return hs
+    - group: maas.opendatahub.io
+      kind: MaasTenantConfig
+      check: |
+        hs = {}
+        if obj.status == nil or (obj.status.conditions == nil and obj.status.phase == nil) then
+          hs.status = "Progressing"
+          hs.message = "Waiting for MaasTenantConfig status"
+          return hs
+        end
+        if obj.status.phase == "Degraded" or obj.status.phase == "Failed" then
+          hs.status = "Degraded"
+          hs.message = "MaasTenantConfig phase: " .. obj.status.phase
+          return hs
+        end
+        if obj.status.phase == "Pending" then
+          hs.status = "Progressing"
+          hs.message = "MaasTenantConfig is pending"
+          return hs
+        end
+        for _, condition in ipairs(obj.status.conditions or {}) do
+          if condition.type == "Degraded" and condition.status == "True" then
+            hs.status = "Degraded"
+            hs.message = condition.message or "MaasTenantConfig is degraded"
+            return hs
+          end
+          if condition.type == "Ready" then
+            if condition.status == "True" then
+              hs.status = "Healthy"
+              hs.message = condition.message or "MaasTenantConfig is ready"
+              return hs
+            elseif condition.status == "False" then
+              hs.status = "Degraded"
+              hs.message = condition.message or "MaasTenantConfig is not ready"
+              return hs
+            end
+          end
+        end
+        hs.status = "Progressing"
+        hs.message = "Waiting for the MaasTenantConfig Ready condition"
         return hs

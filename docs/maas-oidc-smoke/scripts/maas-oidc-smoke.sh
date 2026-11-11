@@ -192,15 +192,25 @@ if [[ -n "$gateway_kube_context" ]]; then
   gateway_kubectl_args=(--context "$gateway_kube_context")
 fi
 
+umask 077
+tmpdir=$(mktemp -d)
+trap 'rm -rf "$tmpdir"' EXIT
+
 gateway_json=""
+gateway_error="$tmpdir/gateway-error.txt"
 if [[ -z "${GATEWAY_HOST:-}" || -z "${GATEWAY_CONNECT_ADDRESS:-}" ]]; then
   if ! gateway_json=$(
-    kubectl "${gateway_kubectl_args[@]}" get gateway "$gateway_name" -n "$gateway_namespace" -o json 2>/dev/null
+    kubectl "${gateway_kubectl_args[@]}" get gateway "$gateway_name" -n "$gateway_namespace" -o json 2>"$gateway_error"
   ); then
     if [[ -n "${GATEWAY_HOST:-}" && -z "${GATEWAY_CONNECT_ADDRESS:-}" ]]; then
       gateway_json=""
     else
-      fail "could not read MaaS Gateway ${gateway_namespace}/${gateway_name}"
+      gateway_error_message=$(tr '\n' ' ' < "$gateway_error")
+      if [[ -n "$gateway_error_message" ]]; then
+        fail "could not read MaaS Gateway ${gateway_namespace}/${gateway_name}: $gateway_error_message"
+      else
+        fail "could not read MaaS Gateway ${gateway_namespace}/${gateway_name}"
+      fi
     fi
   fi
 fi
@@ -249,9 +259,6 @@ gateway_curl() {
   curl --connect-to "${gateway_host}:${gateway_port}:${gateway_connect_address}" "$@"
 }
 
-umask 077
-tmpdir=$(mktemp -d)
-trap 'rm -rf "$tmpdir"' EXIT
 cookie_jar="$tmpdir/cookies.txt"
 headers="$tmpdir/headers"
 body="$tmpdir/body"
@@ -376,6 +383,33 @@ while IFS=$'\t' read -r organization roles; do
   printf '  organization: %s (roles: %s)\n' "$organization" "$roles"
 done < <(jq -r '."https://redhat.com/maas/orgs"[]? | [.organization_id, (.roles // [] | join(", "))] | @tsv' "$me_response")
 
+oidc_models_response="$tmpdir/oidc-models-response.json"
+oidc_models_status=$(
+  gateway_curl -sS --max-time 20 \
+    -H "Authorization: Bearer $(cat "$token_file")" \
+    -o "$oidc_models_response" -w '%{http_code}' \
+    "$base_url/v1/models"
+)
+
+print_section "GET /v1/models (OIDC)"
+printf '  HTTP status: %s\n' "$oidc_models_status"
+if [[ "$oidc_models_status" != 2* ]] || ! jq -e 'type == "object" and (.data | type == "array")' "$oidc_models_response" >/dev/null; then
+  jq . "$oidc_models_response" >&2
+  fail "OIDC model listing failed"
+fi
+
+oidc_models_count=$(jq '.data | length' "$oidc_models_response")
+printf '  model count: %s\n' "$oidc_models_count"
+if (( oidc_models_count == 0 )); then
+  printf '  models: none\n'
+else
+  printf '  models:\n'
+  while IFS=$'\t' read -r id owned_by; do
+    printf '    - %s\n' "$id"
+    printf '        owned by: %s\n' "$owned_by"
+  done < <(jq -r '.data[] | [.id, (.owned_by // "")] | @tsv' "$oidc_models_response")
+fi
+
 subscriptions_response="$tmpdir/subscriptions-response.json"
 subscriptions_status=$(
   gateway_curl -sS --max-time 20 \
@@ -446,10 +480,13 @@ if (( owner_subscription_count > 0 )); then
   api_key_id=$(jq -r '.id' "$api_key_response")
   api_key_file="/tmp/maas-${user}-api-key"
   jq -r '.key' "$api_key_response" > "$api_key_file"
+  api_key_subscription=$(jq -r '.subscription' "$api_key_response")
+  [[ -n "$api_key_subscription" && "$api_key_subscription" != "null" ]] ||
+    fail "API key creation did not return a subscription"
   printf '  id: %s\n' "$api_key_id"
   printf '  name: %s\n' "$key_name"
   printf '  prefix: %s\n' "$(jq -r '.keyPrefix' "$api_key_response")"
-  printf '  subscription: %s\n' "$(jq -r '.subscription' "$api_key_response")"
+  printf '  subscription: %s\n' "$api_key_subscription"
   printf '  expires at: %s\n' "$(jq -r '.expiresAt' "$api_key_response")"
   printf '  key file: %s\n' "$api_key_file"
 else
@@ -506,6 +543,38 @@ if [[ -n "$api_key_id" ]]; then
   printf '  newly created key: found\n'
 fi
 
+if [[ -z "$api_key_id" ]]; then
+  print_section "GET /v1/models (API key)"
+  skip_stage models 'no owner-accessible API key was provisioned'
+else
+  api_key_models_response="$tmpdir/api-key-models-response.json"
+  api_key_models_status=$(
+    gateway_curl -sS --max-time 20 \
+      -H "Authorization: Bearer $(cat "$api_key_file")" \
+      -o "$api_key_models_response" -w '%{http_code}' \
+      "$base_url/v1/models"
+  )
+
+  print_section "GET /v1/models (API key)"
+  printf '  HTTP status: %s\n' "$api_key_models_status"
+  if [[ "$api_key_models_status" != 2* ]] || ! jq -e 'type == "object" and (.data | type == "array")' "$api_key_models_response" >/dev/null; then
+    jq . "$api_key_models_response" >&2
+    fail "model listing failed"
+  fi
+
+  api_key_models_count=$(jq '.data | length' "$api_key_models_response")
+  printf '  model count: %s\n' "$api_key_models_count"
+  if (( api_key_models_count == 0 )); then
+    printf '  models: none\n'
+  else
+    printf '  models:\n'
+    while IFS=$'\t' read -r id owned_by; do
+      printf '    - %s\n' "$id"
+      printf '        owned by: %s\n' "$owned_by"
+    done < <(jq -r '.data[] | [.id, (.owned_by // "")] | @tsv' "$api_key_models_response")
+  fi
+fi
+
 inference_failed=0
 inference_succeeded=0
 
@@ -514,7 +583,8 @@ if [[ -z "$api_key_id" ]]; then
   skip_stage inference 'no owner-accessible API key was provisioned'
 else
   inference_model_ref=$(
-    jq -c '[.[] | select(((.roles // []) | length == 0) or ((.roles // []) | index("owner") != null))][0].model_refs[0] // empty' \
+    jq -c --arg subscription "$api_key_subscription" \
+      '[.[] | select(.subscription_id_header == $subscription)][0].model_refs[0] // empty' \
       "$subscriptions_response"
   )
   inference_model=$(jq -r '.name // empty' <<<"$inference_model_ref")
