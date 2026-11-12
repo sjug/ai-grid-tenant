@@ -150,6 +150,13 @@ spec:
                 metadata:
                   name: default-tenant
                   namespace: models-as-a-service
+                  annotations:
+                    # The ai-gateway controller caps each MaaS Envoy's connections, pending
+                    # requests and requests to its payload-processing ext_proc at this budget
+                    # (default 8, max 1024). An ext_proc stream lasts the whole request, so 8
+                    # is about 60 requests per second at 130 ms and under one stream per second
+                    # for 15 s streams; the performance campaign measures the entry at 256.
+                    maas.opendatahub.io/experimental-extproc-max-requests: "256"
                 spec:
                   telemetry:
                     enabled: true

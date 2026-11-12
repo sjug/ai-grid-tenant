@@ -96,6 +96,16 @@ spec:
                     - namespaceSelector:
                         matchLabels:
                           network.openshift.io/policy-group: ingress
+                    {{- if eq (index .metadata.labels "local-cluster") "true" }}
+                    # Performance campaign (2026-11): the generators d41-h03 and d41-h04 reach the
+                    # hub's consumer gateway through a hand-applied LoadBalancer Service
+                    # (runbooks/perf/grid-gateway-perf-entry.yaml) to measure the grid without
+                    # the MaaS entry in front; only those two hosts are admitted.
+                    - ipBlock:
+                        cidr: 198.18.2.3/32
+                    - ipBlock:
+                        cidr: 198.18.2.4/32
+                    {{- end }}
               praxis-provider-gateway:
                 networkPolicy:
                   from:
