@@ -74,15 +74,3 @@ praxis-provider-gateway:
     serviceMonitor:
       labels:
         monitoring.opendatahub.io/scrape: "true"
-
-# Performance campaign (2026-11), shedding cell: the consumer gateways answer 429 with Retry-After once every
-# site serving a model has been full for full_after_ms, instead of queueing. Revert after the cell.
-# Replica cell: two consumer gateway replicas per combined site, each with its own learned routing state.
-praxis-gateway:
-  replicaCount: 2
-  praxisConfig:
-    render:
-      gridServing:
-        siteRoute:
-          availability:
-            shedding: true
