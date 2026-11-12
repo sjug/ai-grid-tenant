@@ -59,7 +59,7 @@ dependencies:
 global:
   relatedImages:
     - name: RELATED_IMAGE_ODH_PRAXIS_AI_GRID_GATEWAY_IMAGE
-      value: registry.redhat.io/rhoai/odh-praxis-ai-grid-gateway-rhel9@sha256:fa06fe6911c549583c8870c8ac5cae094108c40889357e273f313888b71d6633
+      value: registry.redhat.io/rhoai/odh-praxis-ai-grid-gateway-rhel9@sha256:3b59054cd8cc84fa44bd3b77e3d2648f8e28578ec9a298d8cd3128b4c6bfe472
 
 # The ingress profile enrols the consumer gateway's TLS metrics listener in RHOAI's collector;
 # this does the same for the provider gateway. The listener needs the NetworkPolicy, whose

@@ -16,11 +16,6 @@ spec:
     tokenRateLimits:
     - limit: 1000
       window: 1m
-  - name: smollm2-135m-instruct
-    namespace: models-as-a-service
-    tokenRateLimits:
-      - limit: 1000
-        window: 1m
   owner:
     groups:
     - name: 42c3e46f-2477-44d7-a85b-d3b43f6b31fa/ai-grid-users
@@ -37,8 +32,6 @@ metadata:
 spec:
   modelRefs:
   - name: facebook-opt-125m
-    namespace: models-as-a-service
-  - name: smollm2-135m-instruct
     namespace: models-as-a-service
   subjects:
     groups:

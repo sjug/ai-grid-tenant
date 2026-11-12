@@ -251,7 +251,8 @@ with a planned export/import or the admin API.
 
 `grid-tenant-1-idp` and `grid-tenant-2-idp` stand in for organizations' own
 identity providers, which AI Grid never manages: in production that is the
-organization's Keycloak, Okta, Entra ID or similar. Each realm's `saas-broker`
+organization's Keycloak, Okta, Entra ID or similar
+([docs/organization-identity-providers](../../docs/organization-identity-providers/README.md)). Each realm's `saas-broker`
 client sends what any such provider must send in the ID token
 (ODH-ADR-MS-0007), from what the realm's admin manages:
 

@@ -23,9 +23,10 @@ and GridSite CRDs to be Established and for the identity Secrets, then delivers
 the complete network with Local membership, poll transport, SPIFFE trust, and
 the per-cluster gateway reference.
 
-The operator and bootstrap images are the Grid v0.3.0-rc.2 RHDS builds. The
-operator uses the existing RHOAI Subscription image override; bootstrap uses the
-chart's normal image value. Keep both digests aligned with apps/rhoai/values.yaml.
+The bootstrap image is the payload's Grid v0.3.0 build, read from the
+rhods-operator Deployment's RELATED_IMAGE_ODH_PRAXIS_AI_GRID_ENROLLMENT_IMAGE on a
+member. The operator itself comes from the payload. Keep this digest and the gateway
+digest in apps/rhoai/values.yaml aligned with the payload.
 
 Merge the chart update providing work-agent GridSite read permissions before
 this rollout. The local-endpoints policy creates a passthrough signals Route and
@@ -38,9 +39,9 @@ so the operator's own GridSite for it carries no endpoints, and peers admit its
 calls without dialing or polling it.
 
 The enrollment policy is the only source of each member's GridNetwork. The
-operator's config-read RBAC comes from `policies/operator-config-rbac.yaml` until
-the platform's Grid manifests carry it. No enrollment service runs: the RHOAI
-release keeps grid-enrollment disabled.
+operator's read access to its ConfigMap comes from the AI gateway operator's own
+manifests. No enrollment service runs: the RHOAI release keeps grid-enrollment
+disabled.
 
 ## Verify the rollout
 

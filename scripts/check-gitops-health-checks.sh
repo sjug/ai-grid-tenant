@@ -50,9 +50,12 @@ find . -path './.git' -prune -o -type f -name '*.yaml' -print0 |
 # Resources rendered by remote charts or referenced only by Argo
 # ignoreDifferences are not present as adjacent apiVersion/kind pairs in this
 # repository. Keep this list aligned with the live Application resource set.
+# CustomResourceDefinition: retain the CRD health check after the removal of the temporary Grid CRD
+# handback policy (#290).
 cat > "$external" <<'EOF'
 admissionregistration.k8s.io	ValidatingAdmissionPolicy
 admissionregistration.k8s.io	ValidatingAdmissionPolicyBinding
+apiextensions.k8s.io	CustomResourceDefinition
 dscinitialization.opendatahub.io	DSCInitialization
 gateway.networking.k8s.io	GatewayClass
 grid.praxis.fast	GridNetwork

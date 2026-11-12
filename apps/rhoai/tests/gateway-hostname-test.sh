@@ -31,7 +31,12 @@ assert hostnames == [
 appset = yaml.safe_load(open(sys.argv[2]))
 sources = appset["spec"]["template"]["spec"]["sources"]
 source = next(item for item in sources if item.get("path") == "apps/rhoai/gateway-hostname")
-assert source["helm"]["valueFiles"] == ["$values/apps/rhoai/values.yaml"]
+assert source["helm"]["valueFiles"] == [
+    "$values/apps/rhoai/values.yaml",
+    '$values/apps/rhoai/roles/{{ index .metadata.labels "ai-grid/role" }}.yaml',
+    "$values/apps/rhoai/values-{{ .name }}.yaml",
+], source["helm"]["valueFiles"]
+assert source["helm"]["ignoreMissingValueFiles"] is True
 parameters = {parameter["name"]: parameter["value"]
               for parameter in source["helm"]["parameters"]}
 assert parameters == {"clusterNamespace": "{{ .name }}",
@@ -50,4 +55,11 @@ inference_objects=$(helm template rhoai-gateway-hostname "$HERE/../gateway-hostn
   grep -c '^kind:' || true)
 [ "$inference_objects" = 0 ] || { echo "gateway-hostname renders $inference_objects objects for role inference" >&2; exit 1; }
 
-echo "gateway-hostname tests: 2 ok, 0 failed"
+# Route mode: the Route's host is the external name, so no listener hostname is set.
+route_objects=$(helm template rhoai-gateway-hostname "$HERE/../gateway-hostname" \
+  -f "$HERE/../values.yaml" --set clusterNamespace=target-cluster --set role=ingress \
+  --set components.aigateway.modelsAsAService.gateway.openshiftRoute.enabled=true |
+  grep -c '^kind:' || true)
+[ "$route_objects" = 0 ] || { echo "gateway-hostname renders $route_objects objects in Route mode" >&2; exit 1; }
+
+echo "gateway-hostname tests: 3 ok, 0 failed"

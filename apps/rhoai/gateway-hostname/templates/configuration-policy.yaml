@@ -1,5 +1,7 @@
-{{- if ne (.Values.role | default "") "inference" }}
 {{- $gateway := .Values.components.aigateway.modelsAsAService.gateway }}
+{{- /* Route mode: the Route's host is the external name, and a listener hostname breaks its SNI. */}}
+{{- $routeMode := (($gateway.openshiftRoute | default dict).enabled | default false) }}
+{{- if and (ne (.Values.role | default "") "inference") (not $routeMode) }}
 {{- $hostnamePrefix := index $gateway.annotations "ai-grid/maas-gateway-hostname-prefix" }}
 {{- if not $hostnamePrefix }}{{ fail "components.aigateway.modelsAsAService.gateway.annotations.ai-grid/maas-gateway-hostname-prefix is required" }}{{ end }}
 apiVersion: policy.open-cluster-management.io/v1

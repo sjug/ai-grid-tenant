@@ -60,7 +60,28 @@ that repository, no cluster-scoped kinds, and only the kinds the console writes:
 - `acm-models-catalog-maas`: ExternalModel, MaaSModelRef, MaaSSubscription and MaaSAuthPolicy.
 
 A catalog file that collides with an object another Application manages, such as a sample model, stops that
-cluster's catalog sync until it's fixed (`FailOnSharedResource`).
+cluster's catalog sync until it's fixed (`FailOnSharedResource`). The provider backend refuses to create a model
+whose LLMInferenceService, NetworkPolicy, ExternalModel or MaaSModelRef another Application already deploys, and
+names that Application.
+
+### Moving a sample model into the catalog
+
+One Application owns each object. To hand a sample model to the catalog:
+
+1. Remove the model from this repository: its files under `apps/acm-models/<model>/` and `maas/externalmodels/`,
+   and its Placement and ApplicationSet under `hub/`.
+2. Wait for Argo CD to prune them. `acm-models-maas-<cluster>` deletes the ExternalModel and MaaSModelRef on each
+   ingress spoke, and deleting the model's ApplicationSet deletes its Applications and their LLMInferenceService.
+   Check that no LLMInferenceService of that name is left in `ai-grid-internal-models` on the inference spokes, and
+   delete any by hand.
+3. Create the model in the provider console. If the console created it before the sample was removed, its
+   `acm-models-catalog-ingress-<cluster>` Application has stopped retrying: sync it once.
+4. Check that the catalog's Applications are Synced, the console reports the model published, and a tenant's
+   authenticated request reaches it.
+
+MaaS has no entry for the model between steps 2 and 3, and a subscription that names it reports the
+reference unavailable until the catalog's copy exists. smollm2-135m-instruct moved this way; the tenant
+subscriptions in `maas/policies/` no longer name it.
 
 Deletion differs by design. Deleting the models ApplicationSet, or a cluster's folder, leaves its models running
 (`preserveResourcesOnDeletion`). Deleting an ingress or subscriptions Application deletes its MaaS objects with

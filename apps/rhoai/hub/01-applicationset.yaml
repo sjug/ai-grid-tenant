@@ -52,7 +52,7 @@ spec:
           ref: values
         # Immutable OCI snapshot from the 3.6.0 dev channel.
         - repoURL: oci://ghcr.io/opendatahub-io/odh-gitops/rhai-on-openshift-chart
-          targetRevision: 3.6.0-dev.32.1
+          targetRevision: 3.6.0-dev.33.1
           path: .
           helm:
             releaseName: rhai-on-openshift
@@ -118,8 +118,12 @@ spec:
           path: apps/rhoai/gateway-hostname
           helm:
             releaseName: rhoai-gateway-hostname
+            # The same files as the RHOAI chart, so this policy sees the site's exposure mode.
+            ignoreMissingValueFiles: true
             valueFiles:
               - $values/apps/rhoai/values.yaml
+              - '$values/apps/rhoai/roles/{{ index .metadata.labels "ai-grid/role" }}.yaml'
+              - $values/apps/rhoai/values-{{ .name }}.yaml
             parameters:
               - name: clusterNamespace
                 value: '{{ .name }}'

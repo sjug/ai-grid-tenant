@@ -1,3 +1,6 @@
+# AI Grid members and the hub. Predicates are a union: a cluster matches either one.
+# The hub pulls the grid-bootstrap image from the same registry, so it needs the pull
+# secret whether or not it is a site. Any other managed cluster gets nothing.
 apiVersion: cluster.open-cluster-management.io/v1beta1
 kind: Placement
 metadata:
@@ -8,27 +11,17 @@ metadata:
 spec:
   clusterSets:
     - global
----
-apiVersion: cluster.open-cluster-management.io/v1beta1
-kind: Placement
-metadata:
-  name: rhoai-prerequisites-remote-clusters
-  namespace: rhoai-prerequisites
-  annotations:
-    argocd.argoproj.io/sync-wave: "2"
-spec:
-  clusterSets:
-    - global
   predicates:
     - requiredClusterSelector:
         labelSelector:
-          matchExpressions:
-            - key: local-cluster
-              operator: NotIn
-              values:
-                - "true"
-            # The external-services cluster runs Redis itself (apps/external-services).
-            - key: ai-grid/external-services
-              operator: NotIn
-              values:
-                - "true"
+          matchLabels:
+            ai-grid/enabled: "true"
+    - requiredClusterSelector:
+        labelSelector:
+          matchLabels:
+            local-cluster: "true"
+  tolerations:
+    - key: cluster.open-cluster-management.io/unreachable
+      operator: Exists
+    - key: cluster.open-cluster-management.io/unavailable
+      operator: Exists
