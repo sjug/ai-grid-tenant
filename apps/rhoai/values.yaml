@@ -54,6 +54,18 @@ dependencies:
     enabled: false
   nvidiaGPUOperator:
     enabled: false
+  # Raise RHCL operator resources (200m CPU / 300 MiB shipped) after catalog growth caused OOMs on the
+  # hub and spoke-b. OLM applies them to the CSV's one Deployment and container.
+  rhcl:
+    olm:
+      config:
+        resources:
+          limits:
+            cpu: "1"
+            memory: 1Gi
+          requests:
+            cpu: 200m
+            memory: 256Mi
 # The payload's Grid runtimes. Argo renders these charts, not the operator, so
 # they name the images the operator's payload ships.
 global:
