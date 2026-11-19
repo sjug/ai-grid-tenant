@@ -1,0 +1,13 @@
+# Environment-specific configuration for the hub's ai-grid-o11y Application.
+# These values are layered over the chart's defaults
+# (charts/ai-grid-o11y/values.yaml) by the hub's ApplicationSet: uncomment and
+# override only what differs in this environment. Entries left commented match
+# the chart's defaults.
+#
+lokiStack:
+#  size: 1x.demo
+#  retentionDays: 30
+  # Scale Lab cloud69: LVM storage on the hub's workers, no cloud block storage.
+  storageClassName: lvms-vg1
+#  # S3 endpoint used by the object-storage secret provisioned from the OBC credentials.
+#  s3Endpoint: https://s3.openshift-storage.svc:443

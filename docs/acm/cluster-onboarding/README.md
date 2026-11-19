@@ -58,14 +58,6 @@ as an override when present.
 
 ## What the site must provide
 
-- For an ingress or combined site whose external-services cluster serves Keycloak behind a
-  privately signed ingress certificate: the cluster trust must include the
-  external-services cluster's ingress CA before tenants use MaaS ("Trusting the
-  external-services cluster's ingress CA" below): on a site that already runs
-  Authorino, before the role changes; on a fresh site, right after the role
-  label, since the ConfigMaps the trust step needs appear with the role's
-  operators. With a publicly trusted certificate nothing is needed.
-
 - If the platform ships and owns `openshift-operators-redhat`, the Loki operator's
   namespace (managed OpenShift such as OSD or ROSA), label the ManagedCluster
   `ai-grid/platform-namespaces=true` before the role is set, and label existing
@@ -112,61 +104,60 @@ as an override when present.
 
 ## Trusting the MaaS home's ingress CA
 
-Authorino on a MaaS site performs OpenID discovery against the MaaS home's
-Keycloak Route and validates API keys against maas-api over the OpenShift
-service CA. The RHOAI chart's `ai-grid-ingress` and `ai-grid-combined` profiles
-mount three ConfigMaps for that: `odh-trusted-ca-bundle`,
-`openshift-service-ca.crt`, and `home-keycloak-ca`.
+Two clients on a MaaS site perform OpenID discovery against the MaaS home's
+Keycloak Route: Authorino, and the Tenant Admin Console's authentication proxy.
+Neither trusts a privately signed ingress certificate through the system store,
+so `rhoai-ingress-clusters` delivers the home's default ingress CA to every
+ingress or combined site. Nothing is run by hand, and `proxy/cluster` is not
+changed.
 
-When the hub is also the MaaS home, `rhoai-ingress-clusters` reads the hub's
-default ingress certificate (`openshift-config-managed/default-ingress-cert`)
-and creates `home-keycloak-ca` in `kuadrant-system` on every ingress or
-combined site, under the key `home-keycloak-ca.crt`. The role values project
-that ConfigMap directly into Authorino, and the Policy adds it to the Authorino
-CR's volume contract so the operator and Argo CD agree. No site-wide
-`proxy/cluster.spec.trustedCA` mutation is needed. The key is separate from
-`odh-trusted-ca-bundle`'s `ca-bundle.crt` because both ConfigMaps project into
-the same directory: a shared key would replace the system bundle, and a
-Keycloak Route with a publicly signed certificate would then fail OIDC
-discovery. With its own key, Authorino trusts both bundles.
+The Policy reads the CA on the hub:
 
-When MaaS's shared state is on a dedicated cluster labelled
-`ai-grid/external-services=true`, the hub cannot read that cluster's
-`router-ca` Secret directly. The Policy therefore creates an empty
-`home-keycloak-ca` placeholder so the Authorino volume contract remains valid,
-and the real home CA must be added to the site's cluster trust. Use
-`trust-external-services-ca.sh` with `KUBECONFIG` pointing at the site:
+- When the hub is the MaaS home, from its own
+  `openshift-config-managed/default-ingress-cert`, once its Keycloak Route
+  exists.
+- When MaaS's shared state is on a cluster labelled
+  `ai-grid/external-services=true`, from the same ConfigMap on that cluster,
+  through the `external-services-ingress-ca` ManagedClusterView that
+  `apps/external-services` creates in the cluster's hub namespace. ACM
+  refreshes it every five minutes, so a renewed CA follows on its own.
 
-```
-HOME_KUBECONFIG=<external-services cluster kubeconfig> KEYCLOAK_HOST=<Keycloak Route host> REALM=<MaaS realm> \
-  docs/acm/cluster-onboarding/trust-external-services-ca.sh
-```
+It writes the CA to two places:
 
-An external-services cluster that replaced its default ingress certificate passes
-`HOME_CA_FILE=<PEM bundle of the replacement's issuer>` instead of
-`HOME_KUBECONFIG`. The script stops at the first failure and writes nothing
-before every read has succeeded: it checks the two ConfigMaps, obtains and
-validates the issuing CA, reads the bundle `proxy/cluster` names and any
-existing `custom-ca` on their own (only NotFound counts as absent; a bundle
-named by the proxy next to a separate `custom-ca` is refused rather than
-hidden), validates every existing bundle, appends the CA, parses and
-fingerprints the merged bundle, writes `custom-ca` and points `proxy/cluster`
-at it, waits (bounded, default 15 minutes, every request and sleep capped to
-the remaining budget) until every certificate of the merged bundle appears by
-SHA-256 fingerprint in the mounted `odh-trusted-ca-bundle`, and finally
-verifies a TLS connection to the external-services cluster's OpenID discovery document with
-exactly that bundle. On a site that already runs Authorino, run it before
-changing the role; on a fresh site the ConfigMaps appear with the role's
-operators, so run it right after the role label and before onboarding
-tenants.
-`tests/trust-external-services-ca-test.sh` exercises it against stub `oc` and `curl`
-binaries with real certificates.
+- `kuadrant-system/home-keycloak-ca`, under the key `home-keycloak-ca.crt`. The
+  role values project that ConfigMap directly into Authorino, and the Policy
+  adds it to the Authorino CR's volume contract so the operator and Argo CD
+  agree. The key is separate from `odh-trusted-ca-bundle`'s `ca-bundle.crt`
+  because both ConfigMaps project into the same directory: a shared key would
+  replace the system bundle, and a Keycloak Route with a publicly signed
+  certificate would then fail OIDC discovery.
+- `default-dsci.spec.trustedCABundle.customCABundle`, appended so existing
+  custom roots stay. RHOAI publishes the bundle as `odh-ca-bundle.crt` in every
+  `odh-trusted-ca-bundle`, and the portal controller rolls the TAC proxy when
+  it changes. RHOAI's trusted CA management must be `Managed`. On ingress and
+  combined sites the `rhoai` ApplicationSet leaves this field to the Policy, so
+  Helm changes to it do not apply there. A CA rotation appends the new bundle;
+  retire old roots explicitly after the transition.
 
-The placeholder carries no certificate and does not extend trust. A site that
-needs more CA ConfigMaps lists the complete set in
+Until a CA is available (the hub's Keycloak Route or the view's result is not
+there yet), the Policy creates an empty `home-keycloak-ca` placeholder, which
+keeps Authorino's volume contract valid, and leaves the DSCI alone. Its lookups
+are watched, so it delivers the CA as soon as one appears. A publicly signed
+Keycloak certificate needs nothing; the extra root is harmless.
+
+A site that needs more CA ConfigMaps for Authorino lists the complete set in
 `apps/rhoai/values-<cluster>.yaml` under
 `dependencies.rhcl.config.authorinoTrustedCA.configMaps`. The chart patches only
 its named Authorino volume and leaves other Deployment volumes intact.
+
+Sites that earlier ran the removed `trust-external-services-ca.sh` keep the
+`openshift-config/custom-ca` bundle it named in `proxy/cluster`; leave it in
+place. The script merged the site's existing roots into that bundle, so it may
+also hold CAs that registries, the cluster proxy or workloads rely on. To drop
+only the home's CA, an administrator removes that certificate from
+`custom-ca`'s `ca-bundle.crt` and keeps every other certificate. Do not clear
+`proxy/cluster.spec.trustedCA` or delete the ConfigMap unless it holds nothing
+else.
 
 ## Prerequisites
 
@@ -177,6 +168,15 @@ its named Authorino volume and leaves other Deployment volumes intact.
   a kubeconfig context or infrastructure hostname as the ACM cluster name.
 - Enough capacity on the target cluster for the applications that the
   ApplicationSets deploy there.
+
+## Check hub readiness
+
+ACM installation continues after bootstrap. Check registration prerequisites manually;
+`READY` does not verify MultiClusterHub completion or Argo cluster registration:
+
+```sh
+docs/acm/cluster-onboarding/check-hub-ready.sh --hub-context "$HUB_CONTEXT"
+```
 
 ## Import a cluster
 

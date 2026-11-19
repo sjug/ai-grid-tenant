@@ -110,13 +110,11 @@ collector to every one but the hub (`apps/acm/manifests/search`).
 
 ## Changing a site to ingress or combined
 
-The MaaS it gains validates users against the MaaS home's Keycloak Route. On a
-combined hub, the `rhoai-ingress-clusters` Policy publishes the hub's public
-ingress CA as `kuadrant-system/home-keycloak-ca`, and the ingress and combined
-role values and Authorino CR mount it directly in Authorino. On a dedicated
-external-services home, the Policy creates an empty `home-keycloak-ca`
-placeholder; if the home's
-certificate is not publicly trusted, follow the cluster trust procedure in
+The MaaS it gains validates users against the MaaS home's Keycloak Route. The
+`rhoai-ingress-clusters` Policy delivers the home's ingress CA, read on the hub
+for a hub home or through a ManagedClusterView for an external-services home,
+to Authorino (`kuadrant-system/home-keycloak-ca`) and to the TAC
+authentication proxy (the DSCI custom CA bundle). Nothing is run by hand; see
 `docs/acm/cluster-onboarding/README.md` ("Trusting the MaaS home's ingress
 CA"). A site that needs more CA ConfigMaps lists the complete set in
 `apps/rhoai/values-<cluster>.yaml` under

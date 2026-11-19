@@ -6,15 +6,34 @@ which deploys the fleet-wide `cluster-config` ApplicationSet.
 
 ## Cluster admins
 
-Grants `cluster-admin` to a Git-managed list of users through per-user
-`ClusterRoleBinding` objects (`cluster-admin-<user>`). The list is per
-deployment: [`values.yaml`](values.yaml) leaves it empty, and a deployment
-lists its users in [`cluster-admins.yaml`](cluster-admins.yaml). Without that
-file, the chart creates no binding. The `cluster-config`
-ApplicationSet generates one automated Application for every cluster secret
-created by the shared GitOpsCluster integration, including the hub.
-The hub uses Argo CD's in-cluster destination so the controller's
-ServiceAccount, rather than the ACM addon ServiceAccount, applies its RBAC.
+Two owners, two groups:
+
+- The `cluster-admins` Group is managed by OCM on the hub. Git no longer
+  declares it, so Argo CD self-healing never overwrites OCM's member list.
+  Its members hold Argo CD admin through the OpenShift GitOps operator's
+  default RBAC policy.
+- The `ai-grid-admins` Group is Git-owned. Its members are the
+  `cluster_admins` list (per deployment: [`values.yaml`](values.yaml) leaves
+  it empty, a deployment lists its users in
+  [`cluster-admins.yaml`](cluster-admins.yaml)), it receives cluster-admin
+  through the Git-owned `cluster-admin-ai-grid-admins` ClusterRoleBinding,
+  and Argo CD admin through `spec.rbac.policy.csv` in the ArgoCD CR
+  (`apps/gitops-config/manifests/argocd.yaml`).
+
+Both the Group and its binding are rendered only when `hubResources.enabled`
+  is true, matching the Submariner gateway pattern: Argo CD and the OCM-owned
+  group are hub concerns; spokes need no admin group. The hub uses Argo CD's
+  in-cluster destination so the controller's ServiceAccount, rather than the
+  ACM addon ServiceAccount, applies its RBAC.
+
+Editing `cluster_admins` edits Group membership only; the binding is
+  unaffected. The former per-user `cluster-admin-<user>` bindings are gone;
+  they prune on the first automated sync after this change. Argo creates the
+  Group and group binding before pruning the per-user bindings, so admin
+  access never gaps. The removed `gitops-config` Group manifest orphans the
+  live `cluster-admins` Group (that Application runs with `prune: false`);
+  because it is no longer Git-owned, a future removal of `ai-grid-admins`
+  would require manual deletion of the Group and its binding.
 
 ## Submariner gateway nodes
 
@@ -34,13 +53,13 @@ instead of node ports.
 
 ### Adding or removing an admin
 
-Edit `cluster-admins.yaml` and commit. Every generated Application syncs
+Edit `cluster-admins.yaml` and commit. The hub's generated Application syncs
 automatically (prune and self-heal are enabled):
 
-- Adding a username to `cluster_admins` creates its `ClusterRoleBinding` on
-  every ACM managed cluster on the next sync.
-- Removing a username prunes its `ClusterRoleBinding`, revoking cluster-admin on
-  every ACM managed cluster.
+- Adding a username to `cluster_admins` adds it to the `ai-grid-admins` Group
+  on the hub, granting cluster-admin and Argo CD admin, on the next sync.
+- Removing a username removes it from the Group, revoking both. OCM
+  administrators on `cluster-admins` are unaffected either way.
 
 The chart is stored in this repository at [`chart/`](chart/); the Application
 uses the same multi-source pattern as the OSAC apps (chart path plus a
@@ -56,10 +75,9 @@ The ApplicationSet uses `applicationsSync: sync` and
 Application. The fleet-wide `cluster-config` ApplicationSet uses the same
 pruning policy for Applications that no longer match an ACM managed cluster.
 
-Generated Application names include the cluster name and a short hash, while
-the chart renders deterministic `cluster-admin-<user>` binding names. Each
-selected cluster therefore receives exactly one generated Application and one
-binding per user, with no duplicate names.
+Generated Application names include the cluster name and a short hash. Each
+selected cluster therefore receives exactly one generated Application, with
+no duplicate names.
 
 The chart's Submariner gateway policy is hub-only ACM state. The
 `hubResources.enabled` parameter is true only for the hub, so managed
@@ -68,14 +86,14 @@ Placement, or PlacementBinding resources.
 
 ### Constraints
 
-- `cluster_admins` entries must be Kubernetes usernames that are also valid
-  in a DNS-1123 resource name, because the username is embedded in the
-  binding name. IdP-qualified usernames such as `user@domain` require a
-  sanitized binding-name scheme before they can be listed.
-- Bindings reference `kind: User` subjects. A subject that has never
-  authenticated is inert until its first login; the binding itself is created
-  regardless.
-- All resources are cluster-scoped, so `spec.destination.namespace` is only
+- `cluster_admins` entries are Kubernetes usernames. Group members are not
+  constrained to DNS-1123 resource names, so IdP-qualified usernames such as
+  `user@domain` are valid.
+- The Group is granted access via a `kind: Group` subject. A member that has
+  never authenticated is inert until its first login; the Group and binding
+  are created regardless.
+- The Group and binding are hub-only (`hubResources.enabled`); all their
+  resources are cluster-scoped, so `spec.destination.namespace` is only
   present to satisfy the ApplicationSet template; no namespace is created.
 
 ### Validation
@@ -97,8 +115,8 @@ ACM managed cluster. Confirm the generated Applications and bindings:
 kubectl -n openshift-gitops get applications \
   -l argocd.argoproj.io/application-set-name=cluster-config
 oc -n openshift-gitops get application cluster-admins
-oc get clusterrolebindings \
-  cluster-admin-khowell cluster-admin-aballant
+oc get group ai-grid-admins
+oc get clusterrolebinding cluster-admin-ai-grid-admins
 ```
 
 The `cluster-admins` query should return `NotFound` after migration.

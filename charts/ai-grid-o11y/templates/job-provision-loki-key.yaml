@@ -40,7 +40,7 @@ spec:
               [ -n "$BUCKET" ] && [ -n "$AK" ] && [ -n "$SK" ] || { echo "bucket claim Bound but credentials empty" >&2; exit 1; }
               oc create secret generic ${LOKI_NAME}-object-storage -n "$O11Y_NS" \
                 --from-literal=bucketnames="$BUCKET" \
-                --from-literal=endpoint="https://s3.openshift-storage.svc:443" \
+                --from-literal=endpoint="{{ .Values.lokiStack.s3Endpoint }}" \
                 --from-literal=access_key_id="$AK" \
                 --from-literal=access_key_secret="$SK" \
                 --dry-run=client -o yaml | oc apply -f -

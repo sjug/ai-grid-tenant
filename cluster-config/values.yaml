@@ -1,12 +1,13 @@
-# Users granted cluster-admin on every cluster the `cluster-config` ApplicationSet
-# selects. Each entry renders one ClusterRoleBinding named `cluster-admin-<user>`.
-# Empty by default: a deployment lists its own users in cluster-admins.yaml,
-# which the ApplicationSet reads when it exists. Removing an entry prunes its
-# binding on the next automated sync.
+# Users granted cluster-admin on the hub through the `ai-grid-admins` Group and
+# its `cluster-admin-ai-grid-admins` ClusterRoleBinding (hub-only; see
+# clusterrolebinding.yaml). Empty by default: a deployment lists its own users
+# in cluster-admins.yaml, which the ApplicationSet reads when it exists.
+# Editing the list edits Group membership; the binding is unaffected.
+# The `cluster-admins` Group itself is managed by OCM, not Git.
 #
-# Entries must be Kubernetes usernames that are also valid in a DNS-1123
-# resource name (lowercase alphanumeric, '-', or '.'); IdP-qualified names
-# such as "user@domain" need a sanitized binding-name scheme first.
+# Entries must be Kubernetes usernames; Group members are not constrained to
+# DNS-1123 resource names, so IdP-qualified names such as "user@domain" are
+# valid.
 cluster_admins: []
 
 hubResources:

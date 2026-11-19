@@ -1,0 +1,40 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: keycloak-redirect-uris
+rules:
+  - apiGroups:
+      - route.openshift.io
+    resources:
+      - routes
+    verbs:
+      - get
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: keycloak-redirect-uris
+spec:
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          initContainers:
+            - name: discover-uris
+              command:
+                - /bin/bash
+                - -c
+                - |
+                  set -Eeuo pipefail
+
+                  keycloak_host="$(oc get route keycloak -n maas-db \
+                    -o jsonpath='{.status.ingress[0].host}')"
+                  [[ "$keycloak_host" == *.apps.* ]] || {
+                    echo "ERROR: Route keycloak has no apps-domain host" >&2
+                    exit 1
+                  }
+                  apps_domain="${keycloak_host#*.}"
+                  printf 'https://maas.apps.%s/oauth2/callback\n' "$apps_domain" \
+                    > /shared/redirect-uris
+                  printf 'http://localhost:8000/callback\n' >> /shared/redirect-uris
+                  sort -u /shared/redirect-uris -o /shared/redirect-uris

@@ -41,6 +41,14 @@ spec:
             mountPath: /kv-cache/kv/model-cache/models
             subPath: models
       - name: main
+        # opt-125m is a base model without a chat template, so vLLM refuses /v1/chat/completions
+        # (HTTP 400). vLLM loads a bare template name from the chat templates it bundles; ChatML is
+        # its own example. A name needs no shell quoting in the preset's launcher, which evals its
+        # args, and no ConfigMap.
+        # It rarely ends a reply, so vLLM caps replies at 64 tokens; the dotted form needs no JSON quotes.
+        args:
+          - --chat-template=template_chatml.jinja
+          - --override-generation-config.max_new_tokens=64
         env:
           - name: VLLM_CPU_KVCACHE_SPACE
             value: "1"

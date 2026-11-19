@@ -11,6 +11,13 @@ spec:
   hubTemplateOptions:
     serviceAccountName: rhoai-tenant-templating
   policy-templates:
+    # The MaaS home's Keycloak CA, for every client of the saas broker on this
+    # site: Authorino (home-keycloak-ca) and the TAC authentication proxy (the
+    # DSCI custom bundle, which RHOAI publishes as odh-ca-bundle.crt). The CA
+    # is the home's default ingress CA: on the hub, read directly; on an
+    # external-services home, read through the ManagedClusterView that
+    # apps/external-services creates. Until one is available it renders the
+    # placeholder only, and the watched lookups re-render it later.
     - objectDefinition:
         apiVersion: policy.open-cluster-management.io/v1
         kind: ConfigurationPolicy
@@ -23,8 +30,19 @@ spec:
             include:
               - kuadrant-system
           object-templates-raw: |
-            {{hub- $hubKeycloak := lookup "route.openshift.io/v1" "Route" "maas-db" "keycloak" hub}}
-            {{hub- if $hubKeycloak hub}}
+            {{hub- $homes := (lookup "cluster.open-cluster-management.io/v1" "ManagedCluster" "" "" "ai-grid/external-services=true").items hub}}
+            {{hub- $homeCA := "" hub}}
+            {{hub- if $homes hub}}
+            {{hub- $view := lookup "view.open-cluster-management.io/v1beta1" "ManagedClusterView" (index $homes 0).metadata.name "external-services-ingress-ca" hub}}
+            {{hub- /* status.result is null until the first successful read. */ -hub}}
+            {{hub- $result := dig "status" "result" "" $view hub}}
+            {{hub- if $result hub}}
+            {{hub- $homeCA = dig "data" "ca-bundle.crt" "" $result | trim hub}}
+            {{hub- end hub}}
+            {{hub- else if (lookup "route.openshift.io/v1" "Route" "maas-db" "keycloak") hub}}
+            {{hub- $homeCA = fromConfigMap "openshift-config-managed" "default-ingress-cert" "ca-bundle.crt" | trim hub}}
+            {{hub- end hub}}
+            {{hub- if $homeCA hub}}
             # Its own key: Authorino mounts this ConfigMap in one directory with
             # odh-trusted-ca-bundle, whose key is ca-bundle.crt, and a second
             # ca-bundle.crt would replace the system bundle (Keycloak behind a
@@ -38,7 +56,7 @@ spec:
                   name: home-keycloak-ca
                   namespace: kuadrant-system
                 binaryData:
-                  home-keycloak-ca.crt: '{{hub fromConfigMap "openshift-config-managed" "default-ingress-cert" "ca-bundle.crt" | base64enc hub}}'
+                  home-keycloak-ca.crt: '{{hub $homeCA | base64enc hub}}'
             {{hub- else hub}}
             - complianceType: musthave
               objectDefinition:
@@ -67,6 +85,27 @@ spec:
                           - openshift-service-ca.crt
                           - home-keycloak-ca
             {{- end }}
+            {{hub- if $homeCA hub}}
+            {{- $dsci := lookup "dscinitialization.opendatahub.io/v2" "DSCInitialization" "" "default-dsci" }}
+            {{- if $dsci }}
+            {{- $customCA := dig "spec" "trustedCABundle" "customCABundle" "" $dsci }}
+            {{- $homeCA := {{hub $homeCA | toRawJson hub}} }}
+            {{- if not (contains $homeCA $customCA) }}
+            {{- $customCA = printf "%s\n%s\n" $customCA $homeCA }}
+            {{- end }}
+            # Appended, so other custom roots stay. The rhoai ApplicationSet
+            # leaves this field to this Policy on ingress and combined sites.
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: dscinitialization.opendatahub.io/v2
+                kind: DSCInitialization
+                metadata:
+                  name: default-dsci
+                spec:
+                  trustedCABundle:
+                    customCABundle: {{ $customCA | toRawJson }}
+            {{- end }}
+            {{hub- end hub}}
 
     - objectDefinition:
         apiVersion: policy.open-cluster-management.io/v1

@@ -16,14 +16,14 @@ spec:
   project: default
   sources:
     - repoURL: https://github.com/sjug/ai-grid-tenant.git
-      targetRevision: main
+      targetRevision: HEAD
       ref: values
 
     # The Loki operator. Not in the chart: the subchart renders the LokiStack,
     # while the operator is the parent chart's dependencies.loki, and a
     # dedicated hub runs no RHOAI to bring it.
     - repoURL: https://github.com/sjug/ai-grid-tenant.git
-      targetRevision: main
+      targetRevision: HEAD
       path: apps/ai-grid-usage-logs/manifests
 
     # The subchart, not the parent: with skipCrdCheck the parent also renders a
@@ -36,7 +36,7 @@ spec:
     # store/lokistack.yaml, no store/object-storage.yaml, no values.schema.json
     # -- so it cannot render the store at all. Retarget once it catches up.
     - repoURL: https://github.com/opendatahub-io/odh-gitops.git
-      targetRevision: main
+      targetRevision: HEAD
       path: charts/rhai-on-openshift-chart/charts/ai-grid-o11y-hub
       helm:
         releaseName: ai-grid-usage-logs

@@ -7,7 +7,7 @@ spec:
   project: default
   source:
     repoURL: https://github.com/sjug/ai-grid-tenant.git
-    targetRevision: main
+    targetRevision: HEAD
     path: cluster-config/hub
   destination:
     server: https://kubernetes.default.svc

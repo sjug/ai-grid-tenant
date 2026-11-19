@@ -70,6 +70,13 @@ With more than 200 groups in one token, Entra leaves the `groups` claim out and 
 
 The `email` scope makes Entra put the user's email (their mail attribute) in the ID token, when the user has one ([Microsoft: ID token claims](https://learn.microsoft.com/en-us/entra/identity-platform/id-token-claims-reference)). Entra sends no `email_verified` claim, so Keycloak marks the email verified when it creates the user ([Verified email](README.md#what-the-identity-provider-must-send)). That's also why the **User info URL** stays empty below: Entra's user info response has no `email_verified` either, nor `groups` or `roles`.
 
+### 6. Send `preferred_username`
+
+The `profile` scope makes Entra put `preferred_username` in the ID token.
+AI Grid uses it as a display label. The broker's issuer and subject identify
+the user. The backend's `AI Grid preferred username` mapper forwards the label
+through `maas_preferred_username`.
+
 ## On the hub
 
 Store the client secret's **Value**, with no trailing newline ([step 3](README.md#3-store-the-client-secret-on-the-hub)):
@@ -92,7 +99,7 @@ rm <file>
 | Client ID | `<client-id>` |
 | Client secret reference | `<organization-name>-idp` |
 | Issuer | `https://login.microsoftonline.com/<tenant-id>/v2.0` |
-| Default scopes | `openid email profile` |
+| Default scopes | `openid profile email` |
 | Validate signature | On |
 | Authorization URL | `https://login.microsoftonline.com/<tenant-id>/oauth2/v2.0/authorize` |
 | Token URL | `https://login.microsoftonline.com/<tenant-id>/oauth2/v2.0/token` |
@@ -105,8 +112,11 @@ These come from `https://login.microsoftonline.com/<tenant-id>/v2.0/.well-known/
 ## Check
 
 1. Sign in to the MaaS portal as one of the organization's admins ([step 5](README.md#5-sign-in)).
-2. In Keycloak's admin console (realm `saas`), the user's **Attributes** show `maas_roles` = `admins` and `maas_groups` = their groups.
+2. In Keycloak's admin console (realm `saas`), make sure that the user's Attributes include `maas_roles` = `admins` and `maas_groups`.
 3. Create a subscription for the organization with those group names ([step 6](README.md#6-grant-models)), and check that the portal lists its models.
+
+After a fresh upstream sign-in, `maas_preferred_username`
+also contains the display label when Entra sends it.
 
 | If | Then |
 | --- | --- |
@@ -118,21 +128,28 @@ These come from `https://login.microsoftonline.com/<tenant-id>/v2.0/.well-known/
 
 ## Rotate the client secret
 
-The backend copies the client secret into Keycloak only when it creates the organization, so a new secret goes into Keycloak directly:
+Use the backend update API described in the
+[general guide](README.md#update-an-identity-provider-through-the-backend).
+It reads the new Secret and updates the existing Keycloak provider.
 
 1. In the app registration, **Certificates & secrets**: create a new client secret and copy its **Value**.
-2. In Keycloak's admin console (realm `saas`): **Identity providers**, `<organization-name>`, **Settings**: paste the new value in **Client Secret** (1), then **Save** (2), which turns active once the field changes.
-
-   ![The identity provider's settings in Keycloak, with the Client Secret field marked 1 and Save marked 2](images/09-keycloak-idp-client-secret.png)
-3. On the hub, update the Secret to match:
+2. On the hub, store the value in a Secret with a new name:
 
    ```sh
    printf '%s' '<new-client-secret-value>' > <file>
-   oc -n ai-grid-idp-secrets create secret generic <organization-name>-idp --from-file=client-secret=<file> \
-     --dry-run=client -o yaml | oc apply -f -
+   oc -n ai-grid-idp-secrets create secret generic <organization-name>-idp-next --from-file=client-secret=<file>
    rm <file>
    ```
 
-4. Once sign-ins work, delete the old secret in Entra.
+3. Read the tenant's current `metadata.version` through the authorized backend API.
+4. Update its complete `spec.identity_provider` object with `config.client_secret_secret_name` set to `<organization-name>-idp-next`.
+   Include the tenant `id`, current `metadata.version`, and `update_mask=spec.identity_provider`.
+5. After the update succeeds, make sure that users can sign in.
+6. Once sign-ins work, delete the old secret in Entra.
+
+Keep the old Kubernetes Secret until the update succeeds. The backend needs its
+value to restore the previous configuration if a later step fails. Overwriting
+the original Secret and resending an unchanged provider object does not rotate
+the secret in Keycloak.
 
 Microsoft recommends certificates over client secrets for production apps; Keycloak's broker here uses a client secret.

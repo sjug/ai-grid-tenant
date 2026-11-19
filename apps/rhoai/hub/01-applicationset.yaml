@@ -48,11 +48,11 @@ spec:
       project: default
       sources:
         - repoURL: https://github.com/sjug/ai-grid-tenant.git
-          targetRevision: main
+          targetRevision: HEAD
           ref: values
         # Immutable OCI snapshot from the 3.6.0 dev channel.
         - repoURL: oci://ghcr.io/opendatahub-io/odh-gitops/rhai-on-openshift-chart
-          targetRevision: 3.6.0-dev.33.1
+          targetRevision: 3.6.0-dev.37.1
           path: .
           helm:
             releaseName: rhai-on-openshift
@@ -87,25 +87,50 @@ spec:
               - name: dependencies.clusterObservability.enabled
                 value: '{{ ne (index .metadata.labels "local-cluster") "true" | toString }}'
             values: |
+              components:
+                kserve:
+                  gateway:
+                    annotations:
+                      # The chart profile's annotation plus clientCertificate: Grid presents its
+                      # site certificate on the grid listener and sends no token. tokenSecret
+                      # stays so removing clientCertificate restores the token path. An ingress
+                      # site renders no serving gateway, so the value is unused there.
+                      grid.opendatahub.io/serving: >-
+                        {
+                          "networkName": "grid",
+                          "namespace": "redhat-ai-grid",
+                          "serviceAccount": "grid-model-client",
+                          "tokenSecret": "grid-model-client-token",
+                          "publishMetrics": true,
+                          "clientCertificate": {"listener": "grid", "siteName": {{ .name | quote }}}
+                        }
               praxis-gateway:
+                # The consumer gateway does not authenticate its caller, so only the MaaS gateway's pods reach it.
                 networkPolicy:
                   from:
-                    - podSelector:
-                        matchLabels:
-                          grid.opendatahub.io/gateway-client: "true"
                     - namespaceSelector:
                         matchLabels:
-                          network.openshift.io/policy-group: ingress
+                          kubernetes.io/metadata.name: openshift-ingress
+                      podSelector:
+                        matchLabels:
+                          gateway.networking.k8s.io/gateway-name: maas-default-gateway
                     {{- if eq (index .metadata.labels "local-cluster") "true" }}
                     # Performance campaign (2026-11): the generators d41-h03 and d41-h04 reach the
                     # hub's consumer gateway through a hand-applied LoadBalancer Service
-                    # (runbooks/perf/grid-gateway-perf-entry.yaml) to measure the grid without
-                    # the MaaS entry in front; only those two hosts are admitted.
+                    # (runbooks/perf/grid-gateway-perf-entry.yaml); only those two hosts are admitted.
                     - ipBlock:
                         cidr: 198.18.2.3/32
                     - ipBlock:
                         cidr: 198.18.2.4/32
                     {{- end }}
+                # Sovereignty fence in audit mode: counts what enforce would refuse, refuses nothing.
+                praxisConfig:
+                  render:
+                    gridServing:
+                      siteRoute:
+                        sovereignty:
+                          header: x-grid-sovereignty-zone
+                          mode: audit
               praxis-provider-gateway:
                 networkPolicy:
                   from:
@@ -124,7 +149,7 @@ spec:
                         {{- end }}
                     {{- end }}
         - repoURL: https://github.com/sjug/ai-grid-tenant.git
-          targetRevision: main
+          targetRevision: HEAD
           path: apps/rhoai/gateway-hostname
           helm:
             releaseName: rhoai-gateway-hostname
@@ -143,7 +168,7 @@ spec:
                 value: '{{ index .metadata.labels "ai-grid/role" }}'
                 forceString: true
         - repoURL: https://github.com/sjug/ai-grid-tenant.git
-          targetRevision: main
+          targetRevision: HEAD
           path: apps/rhoai/catalog
           helm:
             releaseName: rhoai-nightly-catalog
@@ -190,6 +215,14 @@ spec:
           name: default-dsci
           jsonPointers:
             - /spec/monitoring/usageLogs
+          # On MaaS sites, apps/rhoai/hub's rhoai-authorino-home-keycloak-ca
+          # Policy appends the MaaS home's Keycloak CA to this field. Keep
+          # ingress/combined in step with 03-ingress-clusters-placement.yaml.
+          jqPathExpressions:
+            - >-
+              select("{{ index .metadata.labels "ai-grid/role" }}" == "ingress"
+                or "{{ index .metadata.labels "ai-grid/role" }}" == "combined")
+              | .spec.trustedCABundle.customCABundle
         - group: ""
           kind: Service
           name: grid-provider-gateway

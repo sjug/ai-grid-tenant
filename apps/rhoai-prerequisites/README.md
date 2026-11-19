@@ -5,7 +5,8 @@ the clusters labelled `ai-grid/enabled=true`, and to the hub, which pulls the
 grid-bootstrap image from the same registry. Other managed clusters get nothing:
 
 - the protected `redhat-ai-grid` and `redhat-ods-operator` Namespaces;
-- the same `ImageDigestMirrorSet` used by the hub;
+- image-mirror enforcement on conventional clusters and validation of service-managed
+  mirror mappings on hosted control planes;
 - the `openshift-marketplace/rhoai-catalog-pull-secret` required to pull the
   RHOAI catalog image;
 - merged worker credentials (`openshift-config/pull-secret` on conventional
@@ -44,8 +45,10 @@ still distributed because it does not contain credentials.
 ApplicationSet then discovers this app, ACM applies the prerequisites to the hub and
 to each cluster as it gains the `ai-grid/enabled` label, and the RHOAI ApplicationSet
 deploys after them. Worker credentials are distributed by policy; HCP additionally
-requires the supported worker sync mechanism described below. Service-managed image
-mirror setup is tracked separately in RHAI-18761.
+requires the supported worker sync mechanism described below. Conventional clusters
+receive mirror configuration directly. Hosted control planes require service-managed
+mirror configuration before installation; see
+[hosted control plane image mirrors](#hosted-control-plane-image-mirrors).
 
 The global pull-secret policy is idempotent. It reads the current target
 Secret, preserves unrelated credentials and Docker config fields, and
@@ -121,6 +124,72 @@ Run the local fixture rendering checks with Helm and PyYAML:
 
 ```sh
 python3 apps/rhoai-prerequisites/tests/pull-secret-test.py
+```
+
+## Hosted control plane image mirrors
+
+On clusters whose `Infrastructure/cluster.status.controlPlaneTopology` is
+`External`, image mirrors are owned by the hosting service. ROSA HCP admission
+rejects guest-cluster creation, update or deletion of ImageDigestMirrorSets.
+Configure digest mirrors through the supported service API before RHOAI
+installation; additional guest RBAC does not bypass that restriction.
+
+For ROSA HCP, authenticate `rosa` against the cluster's OCM environment and
+select the target HCP cluster. These commands were checked with ROSA CLI 1.2.67:
+
+```sh
+export ROSA_CLUSTER='<hcp-cluster-name-or-id>'
+rosa list image-mirrors --cluster "$ROSA_CLUSTER" -o json
+```
+
+Inspect existing records first. For each missing source, create its mapping:
+
+```sh
+rosa create image-mirror --cluster "$ROSA_CLUSTER" \
+  --source registry.redhat.io/rhoai --mirrors quay.io/rhoai
+rosa create image-mirror --cluster "$ROSA_CLUSTER" \
+  --source registry.redhat.io/rhaii --mirrors registry.stage.redhat.io/rhaii
+rosa create image-mirror --cluster "$ROSA_CLUSTER" \
+  --source registry.redhat.io/rhaii-early-access --mirrors registry.stage.redhat.io/rhaii-early-access
+rosa create image-mirror --cluster "$ROSA_CLUSTER" \
+  --source registry.redhat.io/rhaii-fast --mirrors registry.stage.redhat.io/rhaii-fast
+```
+
+If a source already exists, retain its record and use
+`rosa edit image-mirror --cluster "$ROSA_CLUSTER" --id '<mirror-id>' --mirrors '<complete-mirror-list>'`
+when an update is needed. Editing replaces the mirror list; preserve any
+existing mirrors that are still required rather than creating duplicate sources.
+
+The `rhoai-image-mirror` ConfigurationPolicy renders an unnamed object template
+on External control planes. ACM evaluates unnamed templates in inform mode,
+even though this shared policy otherwise enforces prerequisites. It checks for
+one ImageDigestMirrorSet containing all four mappings, without creating or
+changing the service-owned resource or requiring its name to be `quay-registry`.
+Missing mappings remain NonCompliant. Mappings split across multiple IDMS
+objects are not covered by this check. Inspect the service's resulting objects:
+
+```sh
+kubectl --context "$SPOKE_CONTEXT" get imagedigestmirrorsets -o yaml
+kubectl --context "$SPOKE_CONTEXT" -n rhoai-prerequisites \
+  get configurationpolicy rhoai-image-mirror
+```
+
+Conventional control planes retain named `quay-registry` enforcement with
+`NeverContactSource`. The ROSA CLI does not expose an equivalent fallback-policy
+setting, so the HCP check does not require `mirrorSourcePolicy` or claim the
+same source-fallback behavior. The policy retains `pruneObjectBehavior: DeleteAll`
+to preserve existing conventional-cluster cleanup behavior. Live pruning of matched
+unnamed HCP resources and named-to-unnamed transitions remains to be verified.
+
+Worker credentials come from the
+[HCP pull-secret path above](#worker-credentials-on-hosted-control-planes),
+implemented in PR #230 for [RHAI-18763](https://redhat.atlassian.net/browse/RHAI-18763).
+A Compliant mirror policy alone does not establish that mirrored image pulls succeed.
+
+Run the local rendering checks with Helm and PyYAML:
+
+```sh
+python3 apps/rhoai-prerequisites/tests/image-mirror-test.py
 ```
 
 ## OpenTelemetry cert-manager compatibility

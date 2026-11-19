@@ -1,9 +1,9 @@
 # The ODF operator channel tracks the cluster's OpenShift minor version
-# (stable-<major.minor>). The dedicated-hub ApplicationSet overrides this from
-# the cluster's openshiftVersion-major-minor label; this default covers the
-# combined-hub bootstrap, which has no cluster labels to draw from.
+# (stable-<major.minor>). There is deliberately no default: both root
+# ApplicationSets set it from the hub's openshiftVersion-major-minor label, and
+# rendering fails rather than guessing when it is missing.
 openshift:
-  version: "4.22"
+  version: ""
 
 # OLM fails every CSV in a namespace with two OperatorGroups. Set false when
 # openshift-storage already has one, for example from an LVMS install.

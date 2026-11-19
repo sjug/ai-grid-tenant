@@ -203,6 +203,33 @@ spec:
                     name: grid-model-client
                     namespace: redhat-ai-grid
 
+    # The serving gateway's grid listener verifies client certificates against the Grid
+    # CA, which the mesh reads from <serving certificate>-cacert in the gateway's
+    # namespace. Only the public certificate is copied, and only where the site has
+    # both the delivered Grid CA and a serving gateway certificate.
+    - objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1
+        kind: ConfigurationPolicy
+        metadata:
+          name: serving-gateway-grid-client-ca
+        spec:
+          remediationAction: enforce
+          severity: high
+          pruneObjectBehavior: DeleteAll
+          object-templates-raw: |
+            {{- if and (lookup "v1" "Secret" "redhat-ai-grid" "grid-ca") (lookup "v1" "Secret" "openshift-ingress" "openshift-ai-inference-service-tls") }}
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: v1
+                kind: Secret
+                type: Opaque
+                metadata:
+                  name: openshift-ai-inference-service-tls-cacert
+                  namespace: openshift-ingress
+                data:
+                  cacert: '{{ fromSecret "redhat-ai-grid" "grid-ca" "ca.crt" }}'
+            {{- end }}
+
     # odh-model-controller grants the grid model client `post` on each published model's
     # path; Kubernetes only lets it grant a verb it holds, and its bundled ClusterRole
     # (RHOAI 3.6 nightly, ee3dcb8) lacks `post`. This ClusterRole, bound per opted-in
@@ -286,31 +313,45 @@ spec:
           remediationAction: enforce
           severity: low
           pruneObjectBehavior: DeleteAll
-          object-templates:
+          object-templates-raw: |
+            {{- $infra := lookup "config.openshift.io/v1" "Infrastructure" "" "cluster" -}}
+            {{- $hcp := eq (dig "status" "controlPlaneTopology" "" ($infra | default dict)) "External" -}}
+            # HCP: unnamed templates are evaluated in inform mode by ACM.
+            # Require the mappings without writing a service-managed resource.
             - complianceType: musthave
               objectDefinition:
                 apiVersion: config.openshift.io/v1
                 kind: ImageDigestMirrorSet
+                {{ if not $hcp }}
                 metadata:
                   name: quay-registry
+                {{ end }}
                 spec:
                   imageDigestMirrors:
                     - source: registry.redhat.io/rhoai
                       mirrors:
                         - quay.io/rhoai
+                      {{ if not $hcp }}
                       mirrorSourcePolicy: NeverContactSource
+                      {{ end }}
                     - source: registry.redhat.io/rhaii
                       mirrors:
                         - registry.stage.redhat.io/rhaii
+                      {{ if not $hcp }}
                       mirrorSourcePolicy: NeverContactSource
+                      {{ end }}
                     - source: registry.redhat.io/rhaii-early-access
                       mirrors:
                         - registry.stage.redhat.io/rhaii-early-access
+                      {{ if not $hcp }}
                       mirrorSourcePolicy: NeverContactSource
+                      {{ end }}
                     - source: registry.redhat.io/rhaii-fast
                       mirrors:
                         - registry.stage.redhat.io/rhaii-fast
+                      {{ if not $hcp }}
                       mirrorSourcePolicy: NeverContactSource
+                      {{ end }}
     - objectDefinition:
         apiVersion: policy.open-cluster-management.io/v1
         kind: ConfigurationPolicy

@@ -9,7 +9,7 @@ spec:
   project: default
   source:
     repoURL: https://github.com/sjug/ai-grid-tenant.git
-    targetRevision: main
+    targetRevision: HEAD
     path: apps/rhoai/hub
   destination:
     server: https://kubernetes.default.svc
@@ -20,11 +20,11 @@ spec:
       selfHeal: true
     retry:
       refresh: true
-      limit: 20
+      limit: -1
       backoff:
         duration: 30s
         factor: 2
-        maxDuration: 30m
+        maxDuration: 3m
     syncOptions:
       - CreateNamespace=true
       - SkipDryRunOnMissingResource=true

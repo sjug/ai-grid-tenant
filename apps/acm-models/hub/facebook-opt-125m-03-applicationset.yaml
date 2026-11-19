@@ -37,7 +37,7 @@ spec:
       project: default
       source:
         repoURL: https://github.com/sjug/ai-grid-tenant.git
-        targetRevision: main
+        targetRevision: HEAD
         path: apps/acm-models/facebook-opt-125m
       destination:
         server: '{{ if eq (index .metadata.labels "local-cluster") "true" }}https://kubernetes.default.svc{{ else }}{{ .server }}{{ end }}'

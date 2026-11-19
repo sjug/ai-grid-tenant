@@ -1,0 +1,7 @@
+# Renders the raw Perses dashboards from ../dashboards/ verbatim.
+# They live outside templates/ because they contain literal Perses/Go template
+# braces that Helm would try to parse; .Files content is emitted as data.
+{{- range $path, $content := .Files.Glob "dashboards/*.yaml" }}
+---
+{{ toString $content }}
+{{- end }}

@@ -1,0 +1,6 @@
+lokiStack:
+  size: 1x.demo
+  retentionDays: 30
+  storageClassName: gp3-csi
+  # S3 endpoint used by the object-storage secret provisioned from the OBC credentials.
+  s3Endpoint: https://s3.openshift-storage.svc:443

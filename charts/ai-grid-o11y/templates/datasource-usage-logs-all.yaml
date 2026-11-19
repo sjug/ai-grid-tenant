@@ -3,6 +3,9 @@ kind: PersesDatasource
 metadata:
   name: usage-logs-all
   namespace: redhat-ods-monitoring
+  annotations:
+    # After the LokiStack (wave 2), whose gateway CA bundle it needs.
+    argocd.argoproj.io/sync-wave: "3"
 spec:
   config:
     display:

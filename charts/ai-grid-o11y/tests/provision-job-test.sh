@@ -6,7 +6,7 @@ HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd); T=$(mktemp -d); trap 'rm -rf
 python3 -c 'import sys, yaml
 d = yaml.safe_load(open(sys.argv[1])); c = d["spec"]["template"]["spec"]["containers"][0]
 assert c["command"] == ["/bin/bash", "-c"], c["command"]; open(sys.argv[2], "w").write(c["args"][0])' \
-  "$HERE/../manifests/job-provision-loki-key.yaml" "$T/job.sh"
+  "$HERE/../templates/job-provision-loki-key.yaml" "$T/job.sh"
 cat > "$T/bin/sleep" <<'END_SLEEP'
 #!/usr/bin/env bash
 exit 0

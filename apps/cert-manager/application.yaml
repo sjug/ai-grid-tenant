@@ -9,7 +9,7 @@ spec:
   project: default
   source:
     repoURL: https://github.com/sjug/ai-grid-tenant.git
-    targetRevision: main
+    targetRevision: HEAD
     path: apps/cert-manager/manifests
   destination:
     server: https://kubernetes.default.svc

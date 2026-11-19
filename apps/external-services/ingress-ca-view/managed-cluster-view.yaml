@@ -1,0 +1,14 @@
+# The external-services cluster's default ingress CA, which signs its Keycloak
+# Route. The rhoai-ingress-clusters Policy reads the result from the hub and
+# delivers it to every MaaS site. A public CA ConfigMap, not a Secret.
+apiVersion: view.open-cluster-management.io/v1beta1
+kind: ManagedClusterView
+metadata:
+  name: external-services-ingress-ca
+spec:
+  scope:
+    kind: ConfigMap
+    version: v1
+    name: default-ingress-cert
+    namespace: openshift-config-managed
+    updateIntervalSeconds: 300

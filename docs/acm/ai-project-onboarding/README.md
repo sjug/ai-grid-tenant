@@ -50,10 +50,18 @@ spec:
       refs:
         - name: openshift-ai-inference
           namespace: openshift-ingress
+  template:
+    containers:
+      - name: main
+        args:
+          - --chat-template=template_chatml.jinja
+          - --override-generation-config.max_new_tokens=64
 ```
 
 - baseRefs picks a platform preset. Use v3-6-0-kserve-config-llm-template for GPU nodes.
 - model.name is the name clients send, and the name MaaS publishes.
+- The model must serve `/v1/chat/completions`, which the MaaS portal's example and playground call, so it needs a chat template. opt-125m is a base model without one, so `--chat-template` gives it vLLM's bundled ChatML template; a model that ships a template needs no argument. Base models without a template are not supported.
+- A base model like opt-125m rarely ends a reply, so `--override-generation-config.max_new_tokens=64` caps replies at 64 tokens, the default and the upper bound for `max_tokens`. Without it, a chat request that sets no `max_tokens`, like the MaaS portal's example, runs to the context limit, minutes on CPU. A chat model that ends its replies needs no cap.
 - router.gateway attaches the model to the inference gateway, which the grid dials.
 - The scheduler argument serves its metrics over TLS, until the platform preset does.
 

@@ -71,18 +71,4 @@ dependencies:
 global:
   relatedImages:
     - name: RELATED_IMAGE_ODH_PRAXIS_AI_GRID_GATEWAY_IMAGE
-      value: registry.redhat.io/rhoai/odh-praxis-ai-grid-gateway-rhel9@sha256:3b59054cd8cc84fa44bd3b77e3d2648f8e28578ec9a298d8cd3128b4c6bfe472
-
-# The ingress profile enrols the consumer gateway's TLS metrics listener in RHOAI's collector;
-# this does the same for the provider gateway. The listener needs the NetworkPolicy, whose
-# peers the ApplicationSet sets per site.
-praxis-provider-gateway:
-  networkPolicy:
-    enabled: true
-  metricsListener:
-    fromNamespaces:
-      - redhat-ods-monitoring
-      - openshift-user-workload-monitoring
-    serviceMonitor:
-      labels:
-        monitoring.opendatahub.io/scrape: "true"
+      value: registry.redhat.io/rhoai/odh-praxis-ai-grid-gateway-rhel9@sha256:72d159385fd19572763a1c38c093c0cf72b88812ca0edb73a829b84bd6d94f43

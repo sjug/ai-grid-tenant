@@ -4,10 +4,10 @@ metadata:
   name: usage-logs
   namespace: redhat-ods-monitoring
   annotations:
-    # After the wave-1 hook has written the object-storage Secret.
+    # After job-provision-loki-key (wave 1) creates its object storage Secret.
     argocd.argoproj.io/sync-wave: "2"
 spec:
-  size: 1x.demo
+  size: {{ .Values.lokiStack.size | quote }}
   limits:
     global:
       otlp:
@@ -23,7 +23,7 @@ spec:
           - name: cluster_name
           - name: cluster_id
       retention:
-        days: 30
+        days: {{ .Values.lokiStack.retentionDays }}
   storage:
     schemas:
       - version: v13
@@ -34,7 +34,7 @@ spec:
     tls:
       caName: openshift-service-ca-bundle
       caKey: service-ca.crt
-  storageClassName: lvms-vg1
+  storageClassName: {{ .Values.lokiStack.storageClassName }}
   tenants:
     mode: openshift-logging
   managementState: Managed

@@ -13,6 +13,14 @@ Environment overrides:
                          Gateway. Defaults to the current context.
   REDIRECT_URI           Redirect URI registered for the OIDC client. Defaults to
                          KEYCLOAK_REDIRECT_URI from the Keycloak secret.
+  BROKER_HINT            Identity provider alias. Defaults to the selected
+                         user's example provider.
+  PASSWORD_SECRET_KEY    Secret key that holds the user's password. Defaults to
+                         the selected user's example key.
+  IDENTITY_ONLY          Set to 1 to stop after the token, /v1/me, and
+                         subscription reads. Defaults to 0.
+  IDENTITY_RESULT_FILE   Optional identity-only result path. The file is created
+                         with mode 0600.
   ASSUME_YES             Set to 1 to proceed without the inference and
                          rate-limit approval prompts.
   GATEWAY_HOST          MaaS Gateway hostname used for the HTTP Host header.
@@ -126,6 +134,15 @@ case "$user" in
     exit 2
     ;;
 esac
+
+broker_hint="${BROKER_HINT:-$broker_hint}"
+password_key="${PASSWORD_SECRET_KEY:-$password_key}"
+identity_only="${IDENTITY_ONLY:-0}"
+identity_result_file="${IDENTITY_RESULT_FILE:-}"
+[[ "$identity_only" == 0 || "$identity_only" == 1 ]] || fail "IDENTITY_ONLY must be 0 or 1"
+if (( identity_only )); then
+  require_inference=0
+fi
 
 require_inference="${REQUIRE_INFERENCE:-${default_require_inference:-1}}"
 [[ "$require_inference" == 0 || "$require_inference" == 1 ]] || fail "REQUIRE_INFERENCE must be 0 or 1"
@@ -446,6 +463,38 @@ else
   done < <(jq -r '.[] | [.subscription_id_header, (.roles // [] | join(", ")), (.organization_id // ""), (.model_refs // [] | map(.name) | join(", "))] | @tsv' "$subscriptions_response")
 fi
 
+if [[ "$identity_only" == 1 ]]; then
+  if [[ -n "$identity_result_file" ]]; then
+    organizations_json=$(jq '[."https://redhat.com/maas/orgs"[]? | {organization_id, roles}]' "$claims")
+    profile_json=$(jq '{name, preferred_username}' "$me_response")
+    subscriptions_json=$(jq '[.[] | {subscription_id: .subscription_id_header, organization_id, roles, model_names: [.model_refs[]?.name]}]' "$subscriptions_response")
+    identity_result_json=$(jq -n \
+      --arg issuer "$(jq -r '.iss' "$claims")" \
+      --arg subject "$(jq -r '.sub' "$claims")" \
+      --argjson organizations "$organizations_json" \
+      --argjson profile "$profile_json" \
+      --argjson subscriptions "$subscriptions_json" \
+      '{
+        issuer: $issuer,
+        subject: $subject,
+        organizations: $organizations,
+        profile: $profile,
+        subscriptions: $subscriptions
+      }')
+    (
+      umask 077
+      printf '%s\n' "$identity_result_json" > "$identity_result_file"
+    )
+    chmod 600 "$identity_result_file"
+  fi
+  print_section "Identity-only result"
+  printf '  mode: identity-only\n'
+  if [[ -n "$identity_result_file" ]]; then
+    printf '  result file: %s\n' "$identity_result_file"
+  fi
+  exit 0
+fi
+
 api_key_id=""
 if (( owner_subscription_count > 0 )); then
   key_name="smoke-${user}-$(date +%s)"
@@ -583,7 +632,7 @@ inference_failed=0
 inference_succeeded=0
 
 if [[ -z "$api_key_id" ]]; then
-  print_section "POST /v1/completions"
+  print_section "POST /v1/chat/completions"
   skip_stage inference 'no owner-accessible API key was provisioned'
 else
   inference_model_ref=$(
@@ -596,11 +645,11 @@ else
     fail "inference would use model $inference_model, not EXPECT_MODEL $expect_model"
   fi
   if [[ -z "$inference_model" ]]; then
-    print_section "POST /v1/completions"
+    print_section "POST /v1/chat/completions"
     skip_stage inference 'no model is available through the subscription'
   else
     confirm_action "Send one completion request to the MaaS Gateway using the newly created ephemeral API key.
-Endpoint: /v1/completions
+Endpoint: /v1/chat/completions
 Model: $inference_model
 Prompt: $inference_prompt" || fail "inference request was not approved"
 
@@ -610,7 +659,7 @@ Prompt: $inference_prompt" || fail "inference request was not approved"
       --argjson max_tokens "$inference_max_tokens" \
       '{
         model: $model,
-        prompt: $prompt,
+        messages: [{role: "user", content: $prompt}],
         max_tokens: $max_tokens
       }')
 
@@ -621,17 +670,17 @@ Prompt: $inference_prompt" || fail "inference request was not approved"
         -H 'Content-Type: application/json' \
         -d "$completions_request" \
         -o "$completions_response" -w '%{http_code}' \
-        "$base_url/v1/completions" || true
+        "$base_url/v1/chat/completions" || true
     )
 
-    print_section "POST /v1/completions"
+    print_section "POST /v1/chat/completions"
     printf '  HTTP status: %s\n' "$completions_status"
     if [[ "$completions_status" != 2* ]] || ! jq -e 'has("choices") and (.choices | length > 0)' "$completions_response" >/dev/null; then
       jq . "$completions_response" >&2 || true
       inference_failed=1
     else
       printf '  model: %s\n' "$(jq -r '.model' "$completions_response")"
-      printf '  response: %s\n' "$(jq -r '.choices[0].text' "$completions_response")"
+      printf '  response: %s\n' "$(jq -r '.choices[0].message.content' "$completions_response")"
       printf '  finish reason: %s\n' "$(jq -r '.choices[0].finish_reason' "$completions_response")"
       printf '  prompt tokens: %s\n' "$(jq -r '.usage.prompt_tokens' "$completions_response")"
       printf '  completion tokens: %s\n' "$(jq -r '.usage.completion_tokens' "$completions_response")"
@@ -674,7 +723,7 @@ else
       skip_stage rate-limit "the ${rate_limit_prompt_tokens}-token exhaustion prompt exceeds RATE_LIMIT_MAX_PROMPT_TOKENS (${rate_limit_max_prompt_tokens})"
     else
       confirm_action "Send additional completion requests to exhaust and verify the subscription token rate limit.
-Endpoint: /v1/completions
+Endpoint: /v1/chat/completions
 Model: $inference_model
 Configured limit: $rate_limit_limit tokens per $rate_limit_window
 The first request uses a dynamically sized prompt; up to $rate_limit_probe_attempts
@@ -688,7 +737,7 @@ subsequent probes expect HTTP 429." ||
         --arg prompt "$rate_limit_prompt" \
         '{
           model: $model,
-          prompt: $prompt,
+          messages: [{role: "user", content: $prompt}],
           max_tokens: 1
         }')
 
@@ -699,7 +748,7 @@ subsequent probes expect HTTP 429." ||
           -H 'Content-Type: application/json' \
           -d "$rate_limit_exhaust_request" \
           -o "$rate_limit_exhaust_response" -w '%{http_code}' \
-          "$base_url/v1/completions" || true
+          "$base_url/v1/chat/completions" || true
       )
 
       print_section "Token rate limit"
@@ -728,7 +777,7 @@ subsequent probes expect HTTP 429." ||
             --arg prompt "Reply with: rate-limit probe." \
             '{
               model: $model,
-              prompt: $prompt,
+              messages: [{role: "user", content: $prompt}],
               max_tokens: 1
             }')
 
@@ -739,7 +788,7 @@ subsequent probes expect HTTP 429." ||
               -H 'Content-Type: application/json' \
               -d "$rate_limit_probe_request" \
               -o "$rate_limit_probe_response" -w '%{http_code}' \
-              "$base_url/v1/completions" || true
+              "$base_url/v1/chat/completions" || true
           )
 
           printf '  probe %s HTTP status: %s\n' "$probe_attempt" "$rate_limit_probe_status"

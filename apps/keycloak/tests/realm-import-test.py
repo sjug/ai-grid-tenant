@@ -88,7 +88,7 @@ def mounts(container):
 
 
 def placeholders(text):
-    return set(PLACEHOLDER.findall(text))
+    return set(PLACEHOLDER.findall(text)) - {"UUID"}
 
 
 def env_sources(container):

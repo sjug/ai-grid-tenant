@@ -1,1 +1,50 @@
 profile: ai-grid-inference
+
+components:
+  kserve:
+    gateway:
+      spec:
+        # The chart profile's http and https listeners, restated because Helm replaces a
+        # list whole, plus the grid listener. Drop this block once the chart profile
+        # carries the grid listener.
+        listeners:
+          - name: http
+            port: 80
+            protocol: HTTP
+            allowedRoutes:
+              namespaces:
+                from: Selector
+                selector:
+                  matchLabels:
+                    grid.opendatahub.io/allowed: "true"
+          - name: https
+            port: 443
+            protocol: HTTPS
+            tls:
+              mode: Terminate
+              certificateRefs:
+                - name: openshift-ai-inference-service-tls
+            allowedRoutes:
+              namespaces:
+                from: Selector
+                selector:
+                  matchLabels:
+                    grid.opendatahub.io/allowed: "true"
+          # Requires a client certificate under the Grid CA, which the mesh reads from
+          # the Secret openshift-ai-inference-service-tls-cacert. Callers on 80 and 443
+          # are not asked for one.
+          - name: grid
+            port: 8443
+            protocol: HTTPS
+            tls:
+              mode: Terminate
+              certificateRefs:
+                - name: openshift-ai-inference-service-tls
+              options:
+                gateway.istio.io/tls-terminate-mode: MUTUAL
+            allowedRoutes:
+              namespaces:
+                from: Selector
+                selector:
+                  matchLabels:
+                    grid.opendatahub.io/allowed: "true"

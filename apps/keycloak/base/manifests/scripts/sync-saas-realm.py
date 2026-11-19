@@ -26,6 +26,10 @@ sync-saas-realm.py sync RENDERED_REALM_FILE
     - a partial import with ifResourceExists SKIP adds the clients, identity
       providers, identity provider mappers, users, groups and roles the realm
       lacks;
+    - the built-in first broker login flow requires a unique user and keeps its
+      organization membership step;
+    - the profile client scope's username mapper and declarative user profile
+      are applied through their Admin REST endpoints;
     - the file's clients, identity providers and identity provider mappers that
       exist are updated in place, on top of their live representation, so their
       ids, sessions, organization links and brokered users' links stay. A
@@ -54,6 +58,7 @@ import urllib.request
 REALM = "saas"
 SYNC_CLIENT = "keycloak-realm-sync"
 SYNC_CLIENT_SECRET_PLACEHOLDER = "${KEYCLOAK_REALM_SYNC_CLIENT_SECRET}"
+UNIQUE_USER_FLOW = "User creation or linking"
 NOT_SETTINGS = {"id", "realm", "keycloakVersion"}
 PARTIAL_IMPORT_KEYS = ("clients", "identityProviders", "identityProviderMappers", "users", "groups", "roles")
 
@@ -182,6 +187,82 @@ def add_missing(admin, realm):
     added = sorted("%s %s" % (r["resourceType"].lower(), r["resourceName"])
                    for r in result.get("results", []) if r.get("action") == "ADDED")
     print("added: %s" % (", ".join(added) or "nothing"))
+
+
+def flow_executions(admin, alias):
+    path = "/authentication/flows/%s/executions" % quote(alias)
+    return [execution for execution in admin.call("GET", path) if execution.get("level", 0) == 0]
+
+
+def require_unique_broker_users(admin):
+    path = "/authentication/flows/%s/executions" % quote(UNIQUE_USER_FLOW)
+    executions = [step for step in flow_executions(admin, UNIQUE_USER_FLOW)
+                  if step.get("providerId") == "idp-create-user-if-unique"]
+    if len(executions) != 1:
+        raise Failure("user creation sub-flow must have one idp-create-user-if-unique step")
+    execution = executions[0]
+    if execution.get("requirement") == "REQUIRED":
+        print("broker user creation is required")
+        return
+    execution = dict(execution)
+    execution["requirement"] = "REQUIRED"
+    admin.call("PUT", path, execution)
+    print("broker user creation set to REQUIRED")
+
+
+def user_profile_configuration(realm):
+    components = realm.get("components", {}).get("org.keycloak.userprofile.UserProfileProvider", [])
+    providers = [component for component in components if component.get("providerId") == "declarative-user-profile"]
+    if len(providers) != 1:
+        raise Failure("realm file must have one declarative user-profile provider")
+    values = providers[0].get("config", {}).get("kc.user.profile.config", [])
+    if len(values) != 1:
+        raise Failure("realm file has no single kc.user.profile.config value")
+    try:
+        return json.loads(values[0])
+    except ValueError:
+        raise Failure("realm file has invalid kc.user.profile.config JSON")
+
+
+def update_user_profile(admin, realm):
+    wanted = user_profile_configuration(realm)
+    current = admin.call("GET", "/users/profile")
+    if current == wanted:
+        print("user profile configuration in place")
+        return
+    admin.call("PUT", "/users/profile", wanted)
+    print("user profile configuration updated")
+
+
+PROFILE_USERNAME_MAPPER_TYPE = "oidc-usermodel-attribute-mapper"
+
+
+def update_profile_username_mapper(admin):
+    scopes = [scope for scope in admin.call("GET", "/client-scopes") if scope.get("name") == "profile"]
+    if len(scopes) != 1:
+        raise Failure("built-in profile client scope not found")
+    scope_id = scopes[0]["id"]
+    path = "/client-scopes/%s/protocol-mappers/models" % scope_id
+    mappers = admin.call("GET", path)
+    matches = [mapper for mapper in mappers
+               if mapper.get("name") == "username" and
+               (mapper.get("config") or {}).get("claim.name") == "preferred_username"]
+    if len(matches) != 1:
+        raise Failure("profile client scope must have one preferred_username mapper named username")
+    mapper = dict(matches[0])
+    config = dict(mapper.get("config") or {})
+    # The built-in mapper is an oidc-usermodel-property-mapper, which reads only
+    # the user's built-in properties: pointed at a custom attribute, it emits no
+    # preferred_username at all. The attribute mapper reads user attributes.
+    if (mapper.get("protocolMapper") == PROFILE_USERNAME_MAPPER_TYPE and
+            config.get("user.attribute") == "maas_preferred_username"):
+        print("profile username mapper in place")
+        return
+    mapper["protocolMapper"] = PROFILE_USERNAME_MAPPER_TYPE
+    config["user.attribute"] = "maas_preferred_username"
+    mapper["config"] = config
+    admin.call("PUT", "%s/%s" % (path, mapper["id"]), mapper)
+    print("profile username mapper updated")
 
 
 def update_clients(admin, realm, redirect_uris_owned_elsewhere=None):
@@ -344,7 +425,10 @@ def sync(path):
                       % (SYNC_CLIENT, status, message))
     admin = Admin(access_token)
     apply_settings(admin, realm)
+    require_unique_broker_users(admin)
     add_missing(admin, realm)
+    update_user_profile(admin, realm)
+    update_profile_username_mapper(admin)
     # The keycloak-redirect-uris CronJob sets this client's redirect URIs.
     update_clients(admin, realm, redirect_uris_owned_elsewhere=os.environ["KEYCLOAK_CLIENT_ID"])
     update_identity_providers(admin, realm)

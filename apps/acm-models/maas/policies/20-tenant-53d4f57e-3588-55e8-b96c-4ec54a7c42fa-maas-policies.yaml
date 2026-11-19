@@ -24,8 +24,8 @@ spec:
       - limit: 1000
         window: 1m
   owner:
-    users:
-    - bob
+    groups:
+    - name: 53d4f57e-3588-55e8-b96c-4ec54a7c42fa/ai-grid-bob
   priority: 0
 ---
 apiVersion: maas.opendatahub.io/v1alpha1
@@ -43,5 +43,5 @@ spec:
   - name: facebook-opt-125m
     namespace: models-as-a-service
   subjects:
-    users:
-    - bob
+    groups:
+    - name: 53d4f57e-3588-55e8-b96c-4ec54a7c42fa/ai-grid-bob

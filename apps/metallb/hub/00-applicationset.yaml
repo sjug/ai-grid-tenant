@@ -26,10 +26,10 @@ spec:
       project: default
       sources:
         - repoURL: https://github.com/sjug/ai-grid-tenant.git
-          targetRevision: main
+          targetRevision: HEAD
           ref: values
         - repoURL: https://github.com/sjug/ai-grid-tenant.git
-          targetRevision: main
+          targetRevision: HEAD
           path: apps/metallb/chart
           helm:
             releaseName: metallb

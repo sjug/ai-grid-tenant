@@ -9,7 +9,7 @@ It renders no store, and keeps no copy of the store's settings.
 
 | Owned by `apps/ai-grid-o11y` | Where |
 |---|---|
-| the LokiStack — name, size, storage class, schemas, 30-day retention, the seven promoted stream labels | `manifests/lokistack.yaml` |
+| the LokiStack — name, size, storage class, schemas, 30-day retention, the promoted stream labels | `manifests/lokistack.yaml` |
 | the bucket | `manifests/obc-usage-logs-bucket.yaml` |
 | the S3 Secret it is translated into | `manifests/job-provision-loki-key.yaml` + `manifests/rbac-provision-loki-key.yaml` |
 | the writer identity | `manifests/sa-usage-logs-writer.yaml`, `clusterrole-…`, `clusterrolebinding-…` |
@@ -41,22 +41,24 @@ the Argo CD repo-server renders without cluster access.
 ## Token minting
 
 The chart does not create the tokens, because a ServiceAccount token is not a
-declarative object. Two PostSync Jobs mint them instead —
+declarative object. Two Sync hooks in wave 4 mint them instead —
 `manifests/31-job-provision-usage-logs-writer-token.yaml` and
 `manifests/32-job-provision-usage-logs-reader-token.yaml` — running as the
 ServiceAccount from `manifests/30-rbac-provision-usage-logs-tokens.yaml`.
+Their RBAC is applied in wave 3, before the Jobs; the consuming Policy follows
+in wave 5. PostSync would deadlock the first sync because the Policy needs
+these Secrets to become Healthy.
 ACM reads the Secrets with `fromSecret` and ships `$ocm_encrypted` ciphertext,
 so the tokens never appear in a managed cluster's manifest.
 
 Both Jobs are idempotent: they decode the stored token's JWT expiry and do
 nothing while more than a week remains and (for the reader) the recorded
-endpoint still matches the store Route. PostSync hooks run on every sync, so
-repeated syncs do not rotate a healthy credential — while expiry, deletion of
-the Secret, or a Route host change triggers a re-mint on the next sync. The
-Policy re-resolves the Secret and each site picks up the new values, so
-rotation is the same operation as creation. The lifetime is one year; the
-cluster's `--service-account-max-token-expiration` may cap what is actually
-issued.
+endpoint still matches the store Route. Repeated syncs do not rotate a healthy
+credential — while expiry, deletion of the Secret, or a Route host change
+triggers a re-mint on the next sync. The Policy re-resolves the Secret and
+each site picks up the new values, so rotation is the same operation as
+creation. The lifetime is one year; the cluster's
+`--service-account-max-token-expiration` may cap what is actually issued.
 
 The reader Job also records the query endpoint, derived from the store Route's
 host because it differs per fleet and the Argo CD repo-server renders without
@@ -128,4 +130,10 @@ A TLS failure without `--cacert` that succeeds with it means the spoke consumer
 is not appending the delivered CA to its system trust pool.
 
 A record pushed at a site collector's receiver should arrive in the hub store
-with `cluster_name`, `model` and `service_name` promoted as stream labels.
+with `cluster_name`, `model`, `service_name`, `organization_id`, and `user_id`
+promoted as stream labels. `user_id` is the URL-safe Base64 encoding of the
+JSON array `[identity_issuer, subject]`.
+
+Historical streams keep the labels they had when they were written. Organization
+admins retain the existing scoped historical view. The identity labels start
+only after the updated MaaS collectors are deployed.

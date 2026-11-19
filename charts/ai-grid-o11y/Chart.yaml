@@ -1,0 +1,5 @@
+apiVersion: v2
+name: ai-grid-o11y
+description: Observability stack for the AI Grid (LokiStack usage logs, Perses dashboards, metric federation)
+type: application
+version: 0.1.0

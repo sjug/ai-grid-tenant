@@ -13,6 +13,12 @@ spec:
         memory: 2Gi
       limits:
         memory: 8Gi
+  # Appended to the operator's default policy, which already grants Argo admin
+  # to the OCM-managed `cluster-admins` Group; this adds the Git-managed
+  # `ai-grid-admins` Group without touching `policy.default`.
+  rbac:
+    policy: |
+      g, ai-grid-admins, role:admin
   # Statusless declarative resources such as ACM PlacementBinding and MetalLB
   # address pools rely on Argo's sync state; scripts/check-gitops-health-checks.sh
   # documents that exception when a new custom resource is added.
@@ -846,18 +852,33 @@ spec:
           hs.message = "Waiting for Placement status"
           return hs
         end
+        -- Misconfigured wins whatever order the conditions are in.
         for _, condition in ipairs(obj.status.conditions) do
           if condition.type == "PlacementMisconfigured" and condition.status == "True" then
             hs.status = "Degraded"
             hs.message = condition.message or "Placement is misconfigured"
             return hs
           end
+        end
+        for _, condition in ipairs(obj.status.conditions) do
           if condition.type == "PlacementSatisfied" then
             if condition.status == "True" then
               hs.status = "Healthy"
               hs.message = condition.message or "Placement decisions are scheduled"
               return hs
-            elseif condition.status == "False" then
+            end
+            -- A Placement that matches no cluster yet is the normal state of a
+            -- site Placement until the first site is added. Degraded here fails
+            -- the sync task, and Argo CD then never applies the app's later
+            -- waves, including hub-side objects in the same app (the hub's
+            -- image mirror Policy in rhoai-prerequisites, the Loki operator in
+            -- ai-grid-usage-logs). Report it Healthy so those waves proceed.
+            if condition.status == "False" and condition.reason == "NoManagedClusterMatched" then
+              hs.status = "Healthy"
+              hs.message = "Waiting for a matching ManagedCluster: " .. (condition.message or "no cluster matches the predicates")
+              return hs
+            end
+            if condition.status == "False" then
               hs.status = "Degraded"
               hs.message = condition.message or "Placement decisions are not scheduled"
               return hs
@@ -1330,6 +1351,26 @@ spec:
         end
         hs.status = "Progressing"
         hs.message = "ConfigurationPolicy compliance: " .. obj.status.compliant
+        return hs
+    - group: view.open-cluster-management.io
+      kind: ManagedClusterView
+      check: |
+        hs = {}
+        if obj.status ~= nil and obj.status.conditions ~= nil then
+          for _, condition in ipairs(obj.status.conditions) do
+            if condition.type == "Processing" then
+              if condition.status == "True" then
+                hs.status = "Healthy"
+              else
+                hs.status = "Degraded"
+              end
+              hs.message = condition.message or condition.reason or "ManagedClusterView processing"
+              return hs
+            end
+          end
+        end
+        hs.status = "Progressing"
+        hs.message = "Waiting for the ManagedClusterView Processing condition"
         return hs
     - group: redis.redis.opstreelabs.in
       kind: RedisReplication

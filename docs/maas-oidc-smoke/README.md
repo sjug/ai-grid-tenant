@@ -37,7 +37,7 @@ GATEWAY_KUBE_CONTEXT='<context-name>' \
   docs/maas-oidc-smoke/scripts/maas-oidc-smoke.sh alice
 ```
 
-Run it for the user-subject authorization policy:
+Run it for Bob's dedicated group policy:
 
 ```sh
 docs/maas-oidc-smoke/scripts/maas-oidc-smoke.sh bob
@@ -62,7 +62,7 @@ docs/maas-oidc-smoke/scripts/maas-oidc-smoke.sh --help
 The rate-limit test uses the selected subscription's smallest finite token
 rate limit. It sizes a generated prompt from the tokens already reported by
 the successful inference request, exhausts the remaining quota, and expects a
-follow-up completion to return HTTP `429`. Because token usage is reported
+follow-up chat completion to return HTTP `429`. Because token usage is reported
 after a response, the probe retries up to `RATE_LIMIT_PROBE_ATTEMPTS` times.
 The test is skipped when the dynamically sized prompt would exceed
 `RATE_LIMIT_MAX_PROMPT_TOKENS`, avoiding an unsafe request payload.
@@ -73,6 +73,46 @@ only. Set `REQUIRE_INFERENCE=0` or `1` to override that, and `EXPECT_MODEL` to
 fail unless inference uses a given model.
 
 ## What the test verifies
+
+The script records the broker issuer and subject. The isolation wrapper compares
+subjects within that shared broker realm. It does not compare issuers.
+The broker's local username is a storage handle and can differ from the
+upstream `preferred_username`. The example tenant-2 policy grants Bob's
+subscription through group `ai-grid-bob`, so Bob's access does not depend on
+the literal username `bob`.
+
+Set `BROKER_HINT` and `PASSWORD_SECRET_KEY` to select either example identity
+provider while keeping the external username `alice`. Set `IDENTITY_ONLY=1` to
+stop after the token exchange, `/v1/me`, `/v1/models`, and `/v1/subscriptions`. This mode
+does not create API keys, call inference, or run the rate-limit probe. Set
+`IDENTITY_RESULT_FILE` to write issuer, subject, organization, profile, and
+subscription IDs, organization IDs, roles, and model names. The file is created with mode `0600` and never
+contains tokens, passwords, client secrets, or API keys.
+
+Use `scripts/identity-isolation-smoke.sh` to compare two companies that both
+use the external username `alice`. Set `IDP_A`, `IDP_B`, `ORG_A`, `ORG_B`,
+`PASSWORD_SECRET_KEY_A`, and `PASSWORD_SECRET_KEY_B`. The wrapper authenticates
+A, B, A, and B. It requires distinct cross-company subjects and stable subjects
+on repeat. For each company's first result, it requires `preferred_username=alice`
+and nonempty organization and subscription lists restricted to the expected organization.
+It does not test key ownership, cross-company key operations, profile renames,
+or rejection of matching emails.
+
+The wrapper currently reads the legacy `https://redhat.com/maas/orgs` array
+from the token. This repository's realm emits flat `org_id`, `org_name`, and
+`roles` claims. The wrapper's organization assertion fails for those tokens
+until the script supports flat claims. The main script also prints organizations
+from the legacy array, so that output omits flat organization claims.
+
+For the reference providers, use `grid-tenant-1` and `grid-tenant-2` as the IdP aliases.
+Their organization IDs are `42c3e46f-2477-44d7-a85b-d3b43f6b31fa` and
+`53d4f57e-3588-55e8-b96c-4ec54a7c42fa`, respectively. Their password keys are
+`GRID_TENANT_1_TEST_USER_PASSWORD` and `GRID_TENANT_2_TEST_USER_PASSWORD`.
+This change requires freshly installed example realms, as described in the
+[Keycloak README](../../apps/keycloak/README.md#deployment-scope).
+
+Run the wrapper only in an authorized environment. Contributors run its input
+checks and shell syntax checks; they do not run the live browserless login.
 
 The script:
 
@@ -85,7 +125,7 @@ The script:
    subscription.
 7. Calls `/v1/api-keys/search` and verifies that a newly created key is listed.
 8. Calls `/v1/models` with the ephemeral API key when one was created.
-9. Asks for approval, then sends an OpenAI-compatible completion request.
+9. Asks for approval, then sends an OpenAI-compatible chat completion request.
 10. Asks for approval, then exhausts and verifies the selected subscription's
    finite token rate limit when it is small enough to test safely.
 
@@ -123,6 +163,10 @@ Successful runs write private runtime credentials under `/tmp`:
 
 Remove these files when they are no longer needed. API keys created by the
 script expire after one hour.
+
+Identity-only runs also write the access-token file. The isolation wrapper
+uses `alice` for both companies, so `/tmp/maas-alice-access-token` contains the
+last login's token. Its temporary identity-result files are removed on exit.
 
 ## GitOps and secret safety
 

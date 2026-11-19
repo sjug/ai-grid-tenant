@@ -8,7 +8,8 @@ metadata:
 spec:
   externalProviderRefs:
     - apiFormat: openai-chat
-      path: /v1/completions
+      # With MaaS API translation on, every request goes to this path: models serve chat completions.
+      path: /v1/chat/completions
       ref:
         name: grid-provider
       # This needs to match the LLMInferenceService spec.model.name

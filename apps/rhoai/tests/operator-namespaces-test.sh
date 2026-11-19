@@ -44,7 +44,6 @@ render() { # role loki-create rhoai-create -> writes $T/out.json {namespaces: [.
   helm template rhai-on-openshift "$CHART" -f "$HERE/../values.yaml" -f "$HERE/../roles/$1.yaml" \
     --set praxis-gateway.grid.siteName=site \
     --set praxis-provider-gateway.grid.siteName=site \
-    --set praxis-provider-gateway.networkPolicy.from[0].podSelector.matchLabels.app=render \
     --set "dependencies.loki.olm.createNamespace=$2" --set "operator.rhoai.olm.createNamespace=$3" \
   | python3 -c 'import sys, yaml, json
 docs = [d for d in yaml.safe_load_all(sys.stdin) if d]

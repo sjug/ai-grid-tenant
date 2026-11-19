@@ -5,3 +5,4 @@ resources:
 patches:
   - path: remove-public-url-policy.yaml
   - path: remove-realm-sync-hooks.yaml
+  - path: redirect-uris.patch.yaml

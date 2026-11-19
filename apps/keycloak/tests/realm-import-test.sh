@@ -29,13 +29,15 @@ all_placeholders=(
 )
 
 check_rendered() {
-  local file
+  local file name
   for file in "$@"; do
-    python3 -m json.tool "$file" >/dev/null
-    if grep -q '\${[A-Z0-9_]*}' "$file"; then
-      echo "unrendered placeholder in $file" >&2
-      exit 1
-    fi
+    uv run python -m json.tool "$file" >/dev/null
+    for name in "${all_placeholders[@]}"; do
+      if grep -q "\${$name}" "$file"; then
+        printf 'unrendered placeholder ${%s} in %s\n' "$name" "$file" >&2
+        exit 1
+      fi
+    done
   done
 }
 

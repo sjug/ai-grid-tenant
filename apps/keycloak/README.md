@@ -1,8 +1,15 @@
 # Keycloak
 
-This app migrates the Keycloak component from
-`lphiri/maas-portal-integration-poc` into a dedicated Argo CD Application. The
+This app installs Keycloak through a dedicated Argo CD Application. The
 bootstrap ApplicationSet discovers `apps/keycloak/application.yaml` automatically.
+
+## Deployment scope
+
+This identity change requires a fresh installation. The code is not yet deployed.
+Start with new `saas` and example tenant realms before onboarding organizations
+or users. Upgrades of populated realms and migration procedures are outside
+the scope of this change. Realm sync initializes the broker settings and
+maintains Git-owned configuration after installation.
 
 ## Install profiles
 
@@ -31,12 +38,15 @@ For a cluster without Argo CD, run:
 apps/keycloak/install.sh
 ```
 
-Use `--render` to print the manifests without applying them. The script uses
+Use `--render` to print the initial manifests without applying them. This output
+excludes the realm sync Jobs in `overlays/direct/jobs`. The script uses
 the default profile and installs in the `maas-db` namespace. It reads the Route
 host assigned by OpenShift and creates the `keycloak-public-url` ConfigMap. It
 does not install or use Argo CD or ACM. It still requires the CloudNativePG
 cluster, External Secrets, and cert-manager to be installed.
 The direct installer creates namespace `maas-db` when it does not exist.
+After Keycloak is ready, it runs the realm sync Jobs in order. A Job is a
+Kubernetes task that runs to completion.
 
 ## Topology
 
@@ -55,7 +65,7 @@ The direct installer creates namespace `maas-db` when it does not exist.
 - The upstream example `AITenant` resource is intentionally not applied by this
   app; the tenant-facing application should own its consumer configuration.
 
-The app intentionally does not create the `maas-db` namespace or a second
+The Argo CD profiles do not create the `maas-db` namespace or a second
 PostgreSQL cluster. It can initially report missing namespace or resource
 errors until the `maas-db` Application has created the namespace and installed
 the CloudNativePG CRDs. Its retry policy refreshes and retries automatically.
@@ -118,7 +128,7 @@ URIs until they are imported again (see
 ## Consumer Portal Redirects
 
 The `keycloak-redirect-uris` CronJob keeps the `tenant-demo` client aligned
-with active AI Grid ingress sites. Every five minutes it lists
+with AI Grid portal callbacks. In the Argo CD profiles, every five minutes it lists
 `ManagedClusters` labelled `ai-grid/enabled=true` and
 `ai-grid/role in (ingress,combined)`, derives each cluster's apps domain from
 its `consoleurl.cluster.open-cluster-management.io` claim, and sets the client's
@@ -127,8 +137,16 @@ redirect URIs to:
 - `https://maas.<cluster-apps-domain>/oauth2/callback` for each site.
 - `http://localhost:8000/callback` for the browserless smoke test.
 
-The job replaces the complete redirect list, so removing a cluster's ingress or
-combined role removes its callback on the next run. Nothing else changes these
+The direct profile reads the local Keycloak Route instead of listing
+ManagedClusters. It registers `https://maas.apps.<cluster-apps-domain>/oauth2/callback`
+and `http://localhost:8000/callback`. Here, `<cluster-apps-domain>` already starts
+with `apps.`. The direct profile therefore registers an extra `apps.` prefix
+compared with the standard MaaS portal hostname. It does not discover remote
+ingress sites.
+
+Both profiles replace the complete redirect list. In the Argo CD profiles,
+removing a cluster's ingress or combined role removes its callback on the next run.
+Nothing else changes these
 redirect URIs: a Keycloak restart doesn't re-import the existing `saas` realm,
 and `keycloak-saas-realm-sync` keeps the client's live redirect URIs. Only a
 new `saas` realm starts with the smoke-test redirect alone, until the first
@@ -196,6 +214,19 @@ Keycloak Deployment is healthy:
 | Identity providers and identity provider mappers the realm has | Updates each in place: same id, so organization links and brokered users' links stay. Config keys the file doesn't set stay. |
 | Identity provider mappers | Deletes the mappers of the file's identity providers that the file doesn't have. Identity providers the file doesn't have, such as the console's organizations', keep all of theirs. |
 | Service-account users | Grants the roles the file gives them. |
+| Built-in broker flow, profile mapper, and user-profile settings | Sets the unique-user step to `REQUIRED`, keeps the organization membership step, and applies the mapper and profile settings through the Admin API. |
+
+Realm sync replaces the complete user-profile configuration with the file's
+definition. Both broker imports retain the standard `email`, `firstName`, and
+`lastName` fields from [Keycloak 26.8.0's default profile](https://github.com/keycloak/keycloak/blob/26.8.0/services/src/main/resources/org/keycloak/userprofile/config/keycloak-default-user-profile.json).
+These fields retain their user permissions, required rules, and validators.
+Only `username` receives admin-only permissions and an explicit required rule.
+The configuration also allows administrators to manage custom user attributes
+through `unmanagedAttributePolicy: ADMIN_EDIT`. This matches the standard profile
+used by the backend's identity isolation tests.
+
+If you need additional profile definitions, add them to both broker imports
+before reconciliation. Realm sync removes definitions omitted from Git.
 
 A partial import with `ifResourceExists: OVERWRITE` isn't used: it deletes and
 re-creates each existing client and identity provider, which gives them new
@@ -211,7 +242,7 @@ These are not reconciled; plan them as a change of their own:
   provider removed from the file from one the console created.
 - Organizations, including the `grid-tenant-1` and `grid-tenant-2` examples, and
   their domains: they are created with the realm only.
-- Components: the realm's signing key provider and its user profile. A realm
+- Components other than the declarative user profile, such as the signing key provider. A realm
   created before the file had the `saas-signing` key provider keeps the keys
   Keycloak generated for it.
 - Users, groups and roles that already exist, apart from the roles of service
@@ -242,10 +273,11 @@ accounts' role mappings) roles, and nothing outside `saas`. If a hook fails,
 the sync fails and the Application's retry policy runs it again; the failed Job
 stays for its logs until the next sync replaces it.
 
-`overlays/direct` (`install.sh`, without Argo CD) leaves both hooks out:
-`kubectl apply` would start them in no order and couldn't update them later.
-A direct install imports `saas` on the first start; apply later edits to it
-with a planned export/import or the admin API.
+`overlays/direct` leaves both hooks out of its first apply because `kubectl`
+does not order them with the Keycloak rollout. `install.sh` runs the same Jobs
+after Keycloak is ready. For later Git edits to `saas`, rerun `apps/keycloak/install.sh`.
+Each run replaces both Jobs and waits for them in order. The reconciliation
+rules and exclusions above also apply to direct installs.
 
 ## Example Tenant Identity Providers
 
@@ -265,10 +297,41 @@ No claim value is a user attribute. `saas`'s identity provider mappers copy the
 two claims on every sign-in (sync mode Force), so a change takes effect at the
 user's next sign-in.
 
+Each example tenant's `saas-broker` client links the standard `profile` and
+`email` client scopes. The broker's upstream authorization request therefore
+accepts `openid profile email`.
+
+The `saas` broker gives each new imported user a generated local username.
+The username mapper uses `${UUID}`, target `LOCAL`, and sync mode `IMPORT`.
+Existing accounts keep their local usernames and broker links on later sign-ins.
+That local username is only a storage handle. A subject is an account identifier
+within its issuer. The broker's `iss` and `sub` pair identifies the platform user.
+The upstream `preferred_username` is copied into
+`maas_preferred_username`. The built-in `profile` scope username mapper reads
+that attribute and emits `preferred_username`. Users without that attribute,
+including service accounts, do not get this claim. The built-in first broker
+login flow creates a unique local account and adds the user to the linked
+organization. Realm sync sets its `idp-create-user-if-unique` step to
+`REQUIRED`, so Keycloak stops sign-in when a local account already matches the
+upstream email or username. The user can link the accounts later through
+Keycloak Account management.
+
+The display label is optional. The generated username and broker
+`sub` are separate values. The legacy `x-maas-username` header carries `sub`.
+
+`grid-tenant-2-idp` contains `alice`, `bob`, and `carol`. Alice in
+`grid-tenant-1-idp` and Alice in `grid-tenant-2-idp` use the same external
+username but remain two different broker subjects. Bob is the only member of
+group `ai-grid-bob`; the tenant-2 MaaS subscription and auth policy select that
+qualified group. Bob's access therefore survives the use of a generated local
+username. See [organization identity providers](../../docs/organization-identity-providers/README.md)
+for the coordinated backend behavior and realm sync prerequisites.
+
 | Realm | User | Groups | Roles | Administers the realm |
 | --- | --- | --- | --- | --- |
 | `grid-tenant-1-idp` | `alice` | `ai-grid-admins`, `ai-grid-users` | `admins` | yes |
-| `grid-tenant-2-idp` | `bob` | `ai-grid-users` | `users` | no |
+| `grid-tenant-2-idp` | `alice` | `ai-grid-users` | `users` | no |
+| `grid-tenant-2-idp` | `bob` | `ai-grid-users`, `ai-grid-bob` | `users` | no |
 | `grid-tenant-2-idp` | `carol` | | `admins` | yes |
 
 Each organization's admin holds the realm's `realm-management` roles
@@ -284,21 +347,11 @@ subscription in the provider console is granted to group names, such as
 Every user in the files has a fixed `id`: it is the `sub` that `saas` links
 the user's brokered account to.
 
-Keycloak imports these realms once, so an edit to their files doesn't reach a
-hub where they exist. To apply one on a test hub, delete the realm (realm
-settings, Action, Delete) and restart Keycloak
-(`kubectl rollout restart deployment/keycloak -n maas-db`): the realm is
-imported again from Git, and the users in the files keep their ids, so their
-links in `saas` stay. Anything the realm's admin created in it is lost.
-
-On a hub whose tenant realms were imported before their users had fixed ids,
-those users get new ids at that import, and each one's link in `saas` still
-points at the old id: their next sign-in stops at "Account already exists".
-For each of them, in realm `saas`: Users, the user, Identity provider links,
-unlink `grid-tenant-*`, then link it again with the user id from the realm file
-and the same username. Deleting the link alone isn't enough: the next sign-in
-then finds the existing `saas` user by email and asks for a password a brokered
-user doesn't have.
+Keycloak imports these example realms only when they do not exist. A fresh
+installation includes tenant-2 Alice, Bob's `ai-grid-bob` membership, and the
+`profile` and `email` client scopes. A later file edit does not update an
+existing example realm. This change provides no upgrade procedure for older
+example realms.
 
 ## Validation
 
@@ -316,7 +369,13 @@ kubectl logs job/keycloak-saas-realm-sync -n maas-db
 ```
 
 Offline checks: `apps/keycloak/tests/realm-import-test.sh` and
-`apps/keycloak/tests/redirect-uris-test.sh`.
+`apps/keycloak/tests/redirect-uris-test.sh`. Also run these offline tests:
+
+```sh
+apps/keycloak/tests/direct-install-test.sh
+uv run --with pyyaml python apps/keycloak/tests/identity-contract-test.py
+uv run python apps/keycloak/tests/identity-smoke-inputs-test.py
+```
 
 The Keycloak database inherits the availability and storage characteristics of
 the existing `maas-db` CloudNativePG cluster. Database backups remain the

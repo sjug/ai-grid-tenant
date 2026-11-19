@@ -52,7 +52,7 @@ spec:
       project: default
       source:
         repoURL: https://github.com/sjug/ai-grid-tenant.git
-        targetRevision: main
+        targetRevision: HEAD
         path: '{{ if eq (index .metadata.labels "local-cluster") "true" }}apps/maas-db/primary{{ else }}apps/maas-db/read-clusters{{ end }}'
       destination:
         server: '{{ if eq (index .metadata.labels "local-cluster") "true" }}https://kubernetes.default.svc{{ else }}{{ .server }}{{ end }}'

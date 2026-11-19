@@ -54,7 +54,7 @@ spec:
       project: acm-models-catalog-models
       source:
         repoURL: https://github.com/sjug/ai-grid-catalog.git
-        targetRevision: main
+        targetRevision: HEAD
         path: '{{.path.path}}'
         kustomize: {}
       destination:
@@ -131,7 +131,7 @@ spec:
       project: acm-models-catalog-maas
       source:
         repoURL: https://github.com/sjug/ai-grid-catalog.git
-        targetRevision: main
+        targetRevision: HEAD
         path: '{{.path.path}}'
         kustomize: {}
       destination:
@@ -207,7 +207,7 @@ spec:
       project: acm-models-catalog-maas
       source:
         repoURL: https://github.com/sjug/ai-grid-catalog.git
-        targetRevision: main
+        targetRevision: HEAD
         path: '{{.path.path}}'
         directory:
           include: "*.yaml"

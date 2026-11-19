@@ -1,15 +1,21 @@
-{{- range $user := .Values.cluster_admins }}
+{{- if .Values.hubResources.enabled }}
+apiVersion: user.openshift.io/v1
+kind: Group
+metadata:
+  name: ai-grid-admins
+users:
+  {{- toYaml .Values.cluster_admins | nindent 2 }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
-  name: cluster-admin-{{ $user }}
+  name: cluster-admin-ai-grid-admins
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
   name: cluster-admin
 subjects:
   - apiGroup: rbac.authorization.k8s.io
-    kind: User
-    name: {{ $user }}
+    kind: Group
+    name: ai-grid-admins
 {{- end }}

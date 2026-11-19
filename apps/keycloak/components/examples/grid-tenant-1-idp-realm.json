@@ -22,6 +22,10 @@
       "attributes": {
         "post.logout.redirect.uris": "${KEYCLOAK_PUBLIC_URL}/realms/saas/broker/grid-tenant-1/endpoint/logout_response"
       },
+      "defaultClientScopes": [
+        "profile",
+        "email"
+      ],
       "protocolMappers": [
         {
           "name": "MaaS tenant groups",
@@ -81,8 +85,7 @@
         "providerId": "declarative-user-profile",
         "subComponents": {},
         "config": {
-          "config-pieces-count": ["1"],
-          "config-piece-0": ["{\"unmanagedAttributePolicy\":\"ADMIN_EDIT\"}"]
+          "kc.user.profile.config": ["{\"unmanagedAttributePolicy\":\"ADMIN_EDIT\"}"]
         }
       }
     ]

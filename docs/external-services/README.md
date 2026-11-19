@@ -4,7 +4,7 @@ MaaS depends on a database, an OIDC provider and a Redis. In production the user
 
 ## Demo install
 
-Label one cluster `ai-grid/external-services=true`. [apps/external-services](../../../apps/external-services/README.md) then installs these on it:
+Label one cluster `ai-grid/external-services=true` and apply `apps/external-services/application.yaml` on the hub. [apps/external-services](../../apps/external-services/README.md) then installs these on it:
 
 | Service | Demo stand-in |
 |---|---|
@@ -20,7 +20,7 @@ These are not supported for production. They have no backup, sizing or upgrade p
 | Service | Where MaaS reads it | Value |
 |---|---|---|
 | Database | Secret `redhat-ai-gateway-infra/maas-db-config` | `DB_CONNECTION_URL` and `DB_READ_CONNECTION_URL`, PostgreSQL URLs with `sslmode=require` |
-| OIDC provider | The `issuerUrl` in the tenant Policy, [apps/rhoai/hub/02-ingress-clusters-policy.yaml](../../../apps/rhoai/hub/02-ingress-clusters-policy.yaml) | The issuer URL, a client ID and an audience |
+| OIDC provider | The `issuerUrl` in the tenant Policy, [apps/rhoai/hub/02-ingress-clusters-policy.yaml](../../apps/rhoai/hub/02-ingress-clusters-policy.yaml) | The issuer URL, a client ID and an audience |
 | Redis | Secret `kuadrant-system/limitador-redis`, key `URL`, which `Limitador/limitador` references | A `redis://` URL |
 
 The tenant Policy also copies the Keycloak client secret into

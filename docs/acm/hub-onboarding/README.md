@@ -4,25 +4,53 @@ How a cluster becomes a Grid site on v0.3.0-rc.3, under Local membership with AC
 
 ## Installing Argo CD
 
-Argo CD runs on the hub and installs everything else from the tenant repo, ACM included. Argo syncs from git, so run it from your own fork. Point the fork's Argo sources at itself, once, and push:
+Argo CD runs on the hub and installs everything else from the GitOps repo, ACM included. Argo syncs from git, so run it from your own fork. Point the fork's Argo sources at itself, once, and push:
 
 ```bash
-git clone https://github.com/<you>/ai-grid-tenant.git
-cd ai-grid-tenant
-scripts/set-tenant-repo.sh https://github.com/<you>/ai-grid-tenant.git main
+git clone https://github.com/<you>/ai-grid-cluster-gitops.git
+cd ai-grid-cluster-gitops
+scripts/set-tenant-repo.sh https://github.com/<you>/ai-grid-cluster-gitops.git main
 git commit -am "Point Argo at this fork" && git push
 ```
+
+Use your actual fork URL and replace `main` with your deployment branch.
 
 Then, as cluster-admin on the hub:
 
 ```bash
 oc login --server=https://api.<hub-cluster-domain>:6443 -u <cluster-admin>
+```
+
+On managed OpenShift such as OSD/ROSA, precreate any missing namespaces using a
+`cluster-admins` group member. On self-managed OpenShift, ACM creates them
+automatically; skip only this block.
+
+```bash
+oc create namespace redhat-ai-grid
+oc create namespace redhat-ods-operator
+```
+
+For all installations, set the pull secrets and run bootstrap:
+
+```bash
 export RHOAI_QUAY_PULL_SECRET=<base64 of user:password for quay.io/rhoai>
 export RHOAI_STAGE_PULL_SECRET=<base64 of user:password for registry.stage.redhat.io>   # needed for model images pulled through the rhaii mirrors
 ./bootstrap.sh
 ```
 
 bootstrap.sh installs the openshift-gitops-operator Subscription, waits for the Argo CRDs, and applies a root ApplicationSet over apps/*/application.yaml. Argo then syncs every app from the fork.
+
+After `bootstrap.sh` completes, run this manual check. `READY` confirms registration
+prerequisites only; it does not check MultiClusterHub completion or Argo cluster
+registration. If it reports `NOT READY`, inspect the reported failure before retrying.
+
+```bash
+docs/acm/cluster-onboarding/check-hub-ready.sh --hub-context <hub-context>
+```
+
+Both profiles wait for the hub's Argo cluster registration and its
+`openshiftVersion-major-minor` label before generating ODF, so its operator
+channel matches the hub. ACM and cluster registration start independently.
 
 The root ApplicationSet is the one object Argo does not sync from Git. After a change to bootstrap/applicationset.yaml, or to bootstrap/dedicated-hub/applicationset.yaml on a dedicated hub, apply it again from the revision the hub tracks:
 
@@ -104,7 +132,7 @@ A dedicated hub runs ACM, cert-manager and grid-enrollment, and no Grid or RHOAI
 BOOTSTRAP_PROFILE=dedicated-hub ./bootstrap.sh
 ```
 
-Its root ApplicationSet, [bootstrap/dedicated-hub/applicationset.yaml](../../../bootstrap/dedicated-hub/applicationset.yaml), syncs acm, acm-models, ai-grid-o11y, ai-grid-policies, ai-grid-spokes, argo-registration, cert-manager, console, external-secrets, gitops-config, grid-bootstrap, keycloak, limitador-redis, maas-db, external-services, metallb, odf, rhoai and rhoai-prerequisites. ACM syncs the full [apps/acm/manifests](../../../apps/acm/manifests) — core, observability, search and Submariner — with [apps/odf](../../../apps/odf) supplying the object storage observability needs. The default ApplicationSet skips [apps/cert-manager](../../../apps/cert-manager), because on a combined hub the RHOAI app installs cert-manager.
+Its root ApplicationSet, [bootstrap/dedicated-hub/applicationset.yaml](../../../bootstrap/dedicated-hub/applicationset.yaml), syncs acm, acm-models, ai-grid-o11y, ai-grid-policies, ai-grid-spokes, argo-registration, cert-manager, console, external-secrets, gitops-config, grid-bootstrap, keycloak, limitador-redis, maas-db, metallb, odf, rhoai and rhoai-prerequisites. ACM syncs the full [apps/acm/manifests](../../../apps/acm/manifests) — core, observability, search and Submariner — with [apps/odf](../../../apps/odf) supplying the object storage observability needs. The default ApplicationSet skips [apps/cert-manager](../../../apps/cert-manager), because on a combined hub the RHOAI app installs cert-manager.
 
 The root generates all Applications except ODF directly from Git, so ACM and argo-registration can start on a fresh hub without an existing Argo cluster registration. ODF is generated separately once the local-cluster registration carries the openshiftVersion-major-minor label; its operator channel then matches that version. Until registration and the version label are available, ODF is absent and ACM observability may wait for its object storage. Verify that acm and argo-registration exist immediately, then check registration and the version label if odf does not appear. An ApplicationSet success condition alone does not confirm that the expected Applications were generated.
 
@@ -114,7 +142,7 @@ ODF installs into openshift-storage, which OLM allows only one OperatorGroup. Th
 
 acm-models brings the sample model and its MaaS objects, to AI Grid sites by role, and the provider console's catalog: its AppProjects and ApplicationSets, which deliver the models and subscriptions the console commits (see [Provider console](#provider-console)). Its GitOpsCluster would duplicate argo-registration, so it stays out.
 
-The hub runs MaaS's shared state: the maas-db primary, Keycloak and Limitador's Redis. Sites reach them over Submariner, and ingress and combined sites get a maas-db read replica. To hold that state on one site instead, label it ai-grid/external-services=true, and [apps/external-services](../../../apps/external-services) installs them there. Do not use both. The default ApplicationSet skips external-services, because a combined hub runs them itself.
+The hub runs MaaS's shared state: the maas-db primary, Keycloak and Limitador's Redis. Sites reach them over Submariner, and ingress and combined sites get a maas-db read replica. To hold that state on one site instead, label it ai-grid/external-services=true and apply [apps/external-services](../../../apps/external-services)/application.yaml, which installs them there. Do not use both. Neither root ApplicationSet generates external-services, so a hub that runs the state itself carries no external-services Placement.
 
 The profile sets two grid-bootstrap values for a new grid on its own hub: external.certManager.ca.mode Generate, and managedClusters.createClusterSetBinding true, since no RHOAI app binds ClusterSet global into redhat-ai-grid there. Keep Generate for the life of the hub: its CA is a cert-manager Certificate.
 

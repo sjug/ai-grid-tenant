@@ -24,14 +24,15 @@ spec:
         files:
           - path: apps/acm/application.yaml
           - path: apps/acm-models/application.yaml
-          - path: apps/ai-grid-o11y/application.yaml
           - path: apps/ai-grid-policies/application.yaml
           - path: apps/ai-grid-spokes/application.yaml
           - path: apps/cert-manager/application.yaml
           - path: apps/console/application.yaml
           - path: apps/gitops-config/application.yaml
           - path: apps/grid-bootstrap/application.yaml
-          - path: apps/external-services/application.yaml
+          # MaaS state runs on this hub. apps/external-services, which holds it on a
+          # labelled site instead, is applied by hand: a hub that runs it itself
+          # would carry an empty external-services Placement.
           - path: apps/maas-db/application.yaml
           - path: apps/keycloak/application.yaml
           - path: apps/limitador-redis/application.yaml
@@ -45,8 +46,50 @@ spec:
           # apps/ai-grid-o11y's LokiStack needs, and the ACM policy that hands each site
           # the writer token. apps/odf, its object storage, is listed below.
           - path: apps/ai-grid-usage-logs/application.yaml
+    # ai-grid-o11y is specified here rather than in
+    # apps/ai-grid-o11y/application.yaml. The ref source exposes this repo to
+    # the chart source as $values, so values/hub/ai-grid-o11y/values.yaml
+    # layers environment-specific configuration over the chart's defaults.
+    - list:
+        elements:
+          - metadata:
+              name: ai-grid-o11y
+              namespace: openshift-gitops
+            spec:
+              project: default
+              sources:
+                - repoURL: https://github.com/sjug/ai-grid-tenant.git
+                  targetRevision: HEAD
+                  ref: values
+                - repoURL: https://github.com/sjug/ai-grid-tenant.git
+                  targetRevision: HEAD
+                  path: charts/ai-grid-o11y
+                  helm:
+                    valueFiles:
+                      - values.yaml
+                      - $values/values/hub/ai-grid-o11y/values.yaml
+              destination:
+                server: https://kubernetes.default.svc
+                namespace: open-cluster-management-observability
+              syncPolicy:
+                automated:
+                  prune: true
+                  selfHeal: true
+                retry:
+                  refresh: true
+                  limit: 10
+                  backoff:
+                    duration: 30s
+                    factor: 2
+                    maxDuration: 10m
+                syncOptions:
+                  - CreateNamespace=true
+                  - SkipDryRunOnMissingResource=true
+                  # Background: under foreground deletion the loki-operator recreates a LokiStack's children
+                  # while garbage collection removes them, and the prune never finishes.
+                  - PrunePropagationPolicy=background
     # Only ODF needs cluster metadata. Wait for ACM registration and its
-    # version label rather than falling back to the chart's default channel.
+    # version label: the operator channel must match the hub's OpenShift version.
     - matrix:
         generators:
           - git:

@@ -9,5 +9,5 @@ spec:
   source: redhat-operators
   sourceNamespace: openshift-marketplace
   name: odf-operator
-  channel: stable-{{ .Values.openshift.version }}
+  channel: stable-{{ required "openshift.version must be set from the cluster's openshiftVersion-major-minor label" .Values.openshift.version }}
   installPlanApproval: Automatic

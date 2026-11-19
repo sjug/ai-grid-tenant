@@ -55,12 +55,10 @@ PY
 done
 
 render() {
-  # The ApplicationSet supplies the provider gateway's NetworkPolicy peers; a plain render needs one.
   helm template rhai-on-openshift "$CHART" -f "$1" -f "$2" \
     --set skipCrdCheck=true \
     --set praxis-gateway.grid.siteName=site \
-    --set praxis-provider-gateway.grid.siteName=site \
-    --set praxis-provider-gateway.networkPolicy.from[0].podSelector.matchLabels.app=render > "$3"
+    --set praxis-provider-gateway.grid.siteName=site > "$3"
 }
 states() {
   python3 - "$1" <<'PY'

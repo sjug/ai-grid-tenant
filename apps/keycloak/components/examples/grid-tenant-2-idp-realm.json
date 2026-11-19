@@ -22,6 +22,10 @@
       "attributes": {
         "post.logout.redirect.uris": "${KEYCLOAK_PUBLIC_URL}/realms/saas/broker/grid-tenant-2/endpoint/logout_response"
       },
+      "defaultClientScopes": [
+        "profile",
+        "email"
+      ],
       "protocolMappers": [
         {
           "name": "MaaS tenant groups",
@@ -81,8 +85,7 @@
         "providerId": "declarative-user-profile",
         "subComponents": {},
         "config": {
-          "config-pieces-count": ["1"],
-          "config-piece-0": ["{\"unmanagedAttributePolicy\":\"ADMIN_EDIT\"}"]
+          "kc.user.profile.config": ["{\"unmanagedAttributePolicy\":\"ADMIN_EDIT\"}"]
         }
       }
     ]
@@ -96,9 +99,32 @@
     }
   },
   "groups": [
-    { "name": "ai-grid-users" }
+    { "name": "ai-grid-users" },
+    { "name": "ai-grid-bob" }
   ],
   "users": [
+    {
+      "id": "24c8e2f3-d7c3-5c11-a56e-530d17d08a9f",
+      "username": "alice",
+      "email": "alice@grid-tenant-2.test",
+      "emailVerified": true,
+      "enabled": true,
+      "firstName": "Alice",
+      "lastName": "Tenant",
+      "groups": [
+        "/ai-grid-users"
+      ],
+      "clientRoles": {
+        "saas-broker": ["users"]
+      },
+      "credentials": [
+        {
+          "type": "password",
+          "value": "${GRID_TENANT_2_TEST_USER_PASSWORD}",
+          "temporary": false
+        }
+      ]
+    },
     {
       "id": "13b11fd1-d8ef-53d3-8070-b759a0f4cf0f",
       "username": "bob",
@@ -108,7 +134,8 @@
       "firstName": "Bob",
       "lastName": "Tenant",
       "groups": [
-        "/ai-grid-users"
+        "/ai-grid-users",
+        "/ai-grid-bob"
       ],
       "clientRoles": {
         "saas-broker": ["users"]

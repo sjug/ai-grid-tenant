@@ -9,6 +9,15 @@ The sample model goes to AI Grid sites where models run (Placement
 (`ai-grid-ingress`); both Placements are `apps/ai-grid-spokes`'. An unlabelled
 hub gets neither.
 
+## Chat completions
+
+Every model, sample or catalog, must serve `/v1/chat/completions`: the MaaS
+portal's usage example and playground call it, and its `ExternalModel` routes
+every request there. A model must ship a chat template or get one with vLLM's
+`--chat-template`. facebook-opt-125m is a base model without one, so it uses
+vLLM's bundled ChatML template. A base model without a template is not
+supported.
+
 ## Scheduler metrics
 
 The Gateway's serving configuration enables `publishMetrics: true`, so the

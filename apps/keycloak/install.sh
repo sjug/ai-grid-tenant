@@ -83,3 +83,16 @@ kubectl kustomize --load-restrictor=LoadRestrictionsNone "$tmpdir" |
   kubectl apply -f -
 
 kubectl rollout status deployment/keycloak -n "$namespace" --timeout=300s
+
+kubectl kustomize --load-restrictor=LoadRestrictionsNone "$script_dir/overlays/direct/jobs" \
+  > "$tmpdir/realm-sync-jobs.yaml"
+kubectl delete job keycloak-realm-sync-bootstrap keycloak-saas-realm-sync \
+  -n "$namespace" --ignore-not-found
+kubectl apply -f "$tmpdir/realm-sync-jobs.yaml" \
+  -l app.kubernetes.io/name=keycloak-realm-sync-bootstrap
+kubectl wait --for=condition=complete job/keycloak-realm-sync-bootstrap \
+  -n "$namespace" --timeout=900s
+kubectl apply -f "$tmpdir/realm-sync-jobs.yaml" \
+  -l app.kubernetes.io/name=keycloak-saas-realm-sync
+kubectl wait --for=condition=complete job/keycloak-saas-realm-sync \
+  -n "$namespace" --timeout=900s

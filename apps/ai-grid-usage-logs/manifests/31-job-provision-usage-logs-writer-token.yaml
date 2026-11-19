@@ -1,24 +1,25 @@
 # Mint the hub usage-log writer token, replacing the former
 # create-writer-token.sh. A ServiceAccount token is not a declarative object,
-# so no manifest can hold it; the Job mints it after sync and stores it in the
+# so no manifest can hold it; the Job mints it during sync and stores it in the
 # Secret the spoke Policy reads with fromSecret.
 #
 # Idempotent: if the stored token is still a JWT with more than a week left
-# before expiry, the Job does nothing. So a repeated sync (PostSync hooks run
-# on every sync) does not rotate a healthy credential, while expiry, deletion
-# of the Secret, or a manually shortened token triggers a re-mint on the next
-# sync -- rotation is the same operation as creation.
+# before expiry, the Job does nothing. So a repeated sync does not rotate a
+# healthy credential, while expiry, deletion of the Secret, or a manually
+# shortened token triggers a re-mint on the next sync -- rotation is the same
+# operation as creation.
 #
-# Wave ordering is handled by the hook type: PostSync runs after the store's
-# own storage-key hook and every wave of this Application, so the
-# apps/ai-grid-o11y-owned ServiceAccount exists by then.
+# Sync wave 4 runs after provisioning RBAC (wave 3) and before the spoke
+# Policy (wave 5), which needs this Secret to become Healthy. The writer
+# ServiceAccount is owned by apps/ai-grid-o11y.
 apiVersion: batch/v1
 kind: Job
 metadata:
   generateName: provision-usage-logs-writer-token-
   namespace: redhat-ods-monitoring
   annotations:
-    argocd.argoproj.io/hook: PostSync
+    argocd.argoproj.io/hook: Sync
+    argocd.argoproj.io/sync-wave: "4"
     argocd.argoproj.io/hook-delete-policy: HookSucceeded
 spec:
   template:

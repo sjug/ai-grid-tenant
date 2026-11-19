@@ -1,16 +1,16 @@
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
-  # Only a dedicated hub syncs this. On a hub that is also a site, MaaS's shared
-  # state runs on the hub through the keycloak, limitador-redis, external-secrets
-  # and maas-db apps, so the default root ApplicationSet excludes it.
+  # Applied by hand on a dedicated hub whose MaaS state runs on a labelled site.
+  # Neither root ApplicationSet generates it: both run that state on the hub
+  # through the keycloak, limitador-redis, external-secrets and maas-db apps.
   name: external-services
   namespace: openshift-gitops
 spec:
   project: default
   source:
     repoURL: https://github.com/sjug/ai-grid-tenant.git
-    targetRevision: main
+    targetRevision: HEAD
     path: apps/external-services/hub
   # maas-db, created untracked, holds the rhoai app's tenant RBAC Role; this
   # app's own objects name the external-services namespace.
