@@ -2,17 +2,19 @@
 """Check that Loki retains the full identity dimensions as stream labels."""
 
 import os
+import subprocess
 
 import yaml
 
 
-APP = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
-MANIFEST = os.path.join(APP, "manifests", "lokistack.yaml")
+CHART = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 
 
 def main():
-    with open(MANIFEST) as stream:
-        resource = yaml.safe_load(stream)
+    rendered = subprocess.run(
+        ["helm", "template", "ai-grid-o11y", CHART, "--show-only", "templates/lokistack.yaml"],
+        check=True, capture_output=True, text=True).stdout
+    resource = yaml.safe_load(rendered)
 
     assert resource["apiVersion"] == "loki.grafana.com/v1"
     assert resource["kind"] == "LokiStack"

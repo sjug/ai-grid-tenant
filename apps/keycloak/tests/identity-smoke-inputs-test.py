@@ -31,7 +31,7 @@ class IdentitySmokeInputsTest(unittest.TestCase):
         self.assertIn('[[ "$identity_only" == 0 || "$identity_only" == 1 ]]', self.main_source)
         cutoff = self.main_source.index("if [[ \"$identity_only\" == 1 ]]")
         api_key = self.main_source.index("api_key_id=\"\"")
-        inference = self.main_source.index("POST /v1/completions")
+        inference = self.main_source.index("POST /v1/chat/completions")
         rate_limit = self.main_source.index("print_section \"Token rate limit\"")
         self.assertLess(cutoff, api_key)
         self.assertLess(cutoff, inference)
