@@ -1,0 +1,102 @@
+# Git stopped declaring the OCM-managed cluster-admins Group, and this
+# Application doesn't prune, so the live Group keeps this Application's
+# tracking annotation and Argo CD reports it as needing prune for good. This
+# PostSync hook removes that annotation, once, from the Group as this
+# Application left it, and changes nothing else: not its members, not a Group
+# another owner tracks.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: cluster-admins-untrack
+  namespace: openshift-gitops
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: ai-grid-cluster-admins-untrack
+rules:
+  - apiGroups: ["user.openshift.io"]
+    resources: ["groups"]
+    resourceNames: ["cluster-admins"]
+    verbs: ["get", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: ai-grid-cluster-admins-untrack
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: ai-grid-cluster-admins-untrack
+subjects:
+  - kind: ServiceAccount
+    name: cluster-admins-untrack
+    namespace: openshift-gitops
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: cluster-admins-untrack
+  namespace: openshift-gitops
+  annotations:
+    argocd.argoproj.io/hook: PostSync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation,HookSucceeded
+spec:
+  backoffLimit: 2
+  activeDeadlineSeconds: 300
+  template:
+    spec:
+      serviceAccountName: cluster-admins-untrack
+      restartPolicy: Never
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: untrack
+          image: registry.redhat.io/openshift4/ose-cli@sha256:75bd612f3d2b4dbddcbd7a48e12b5cb4d36e4a2683e7f48209e40596e0fbfc30
+          command:
+            - /bin/bash
+            - -c
+            - |
+              set -Eeuo pipefail
+              ours="gitops-config:user.openshift.io/Group:openshift-gitops/cluster-admins"
+              key=/metadata/annotations/argocd.argoproj.io~1tracking-id
+              # One patch that removes the annotation only while it still names this
+              # Application, so a new owner's annotation and the members stay untouched.
+              patch='[{"op":"test","path":"'"$key"'","value":"'"$ours"'"},{"op":"remove","path":"'"$key"'"}]'
+              if oc patch group cluster-admins --type=json -p "$patch" >/dev/null 2>&1; then
+                echo "removed this Application's tracking annotation from group cluster-admins"
+                exit 0
+              fi
+              if ! tracking=$(oc get group cluster-admins --ignore-not-found \
+                  -o jsonpath='{.metadata.annotations.argocd\.argoproj\.io/tracking-id}'); then
+                echo "cannot read group cluster-admins" >&2
+                exit 1
+              fi
+              if [ "$tracking" = "$ours" ]; then
+                echo "group cluster-admins still carries this Application's tracking annotation; the patch failed" >&2
+                exit 1
+              fi
+              echo "group cluster-admins carries no tracking annotation of this Application; nothing to do"
+          env:
+            # oc writes its discovery cache under HOME.
+            - name: HOME
+              value: /tmp
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          resources:
+            requests:
+              cpu: 10m
+              memory: 128Mi
+            limits:
+              memory: 256Mi
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}

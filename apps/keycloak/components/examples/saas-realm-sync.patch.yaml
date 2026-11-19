@@ -1,5 +1,5 @@
-# The placeholders this component's saas-realm.json adds: the example identity
-# providers' URLs and broker client secrets.
+# Bootstrap the two example clients before the sync Job runs. Each tenant
+# container receives only its own sync credential and seed password.
 apiVersion: batch/v1
 kind: Job
 metadata:
@@ -25,3 +25,95 @@ spec:
                 secretKeyRef:
                   name: keycloak-secrets
                   key: GRID_TENANT_2_BROKER_CLIENT_SECRET
+        - name: sync-tenant-1
+          image: &image registry.redhat.io/openshift4/ose-cli@sha256:75bd612f3d2b4dbddcbd7a48e12b5cb4d36e4a2683e7f48209e40596e0fbfc30
+          command:
+            - python3
+            - /opt/keycloak/realm-scripts/sync-saas-realm.py
+            - sync-example
+            - grid-tenant-1-idp
+            - /opt/keycloak/realm-import-source/grid-tenant-1-idp-realm.json
+          env:
+            - name: PYTHONDONTWRITEBYTECODE
+              value: "1"
+            - name: KEYCLOAK_URL
+              value: http://keycloak.maas-db.svc.cluster.local:8080
+            - name: GRID_TENANT_1_SYNC_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: grid-tenant-1-realm-sync
+                  key: password
+            - name: GRID_TENANT_1_TEST_USER_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: keycloak-secrets
+                  key: GRID_TENANT_1_TEST_USER_PASSWORD
+          securityContext: &security
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          resources: &resources
+            requests:
+              cpu: 10m
+              memory: 64Mi
+            limits:
+              memory: 128Mi
+          volumeMounts: &mounts
+            - name: realm-import-source
+              mountPath: /opt/keycloak/realm-import-source
+              readOnly: true
+            - name: realm-scripts
+              mountPath: /opt/keycloak/realm-scripts
+              readOnly: true
+        - name: sync-tenant-2
+          image: *image
+          command:
+            - python3
+            - /opt/keycloak/realm-scripts/sync-saas-realm.py
+            - sync-example
+            - grid-tenant-2-idp
+            - /opt/keycloak/realm-import-source/grid-tenant-2-idp-realm.json
+          env:
+            - name: PYTHONDONTWRITEBYTECODE
+              value: "1"
+            - name: KEYCLOAK_URL
+              value: http://keycloak.maas-db.svc.cluster.local:8080
+            - name: GRID_TENANT_2_SYNC_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: grid-tenant-2-realm-sync
+                  key: password
+            - name: GRID_TENANT_2_TEST_USER_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: keycloak-secrets
+                  key: GRID_TENANT_2_TEST_USER_PASSWORD
+          securityContext: *security
+          resources: *resources
+          volumeMounts: *mounts
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: keycloak-realm-sync-bootstrap
+spec:
+  template:
+    spec:
+      containers:
+        - name: bootstrap
+          args:
+            - grid-tenant-1-idp
+            - grid-tenant-2-idp
+          env:
+            - name: GRID_TENANT_1_SYNC_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: grid-tenant-1-realm-sync
+                  key: password
+            - name: GRID_TENANT_2_SYNC_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: grid-tenant-2-realm-sync
+                  key: password

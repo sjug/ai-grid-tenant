@@ -52,6 +52,58 @@ wait_for_argocd() {
 }
 wait_for_argocd
 
+# Under ACM load the application controller can be OOM-killed before it syncs gitops-config, which is
+# what sets its memory. Apply the same controller resources here, read from that manifest so it stays
+# the one source of the values, before the root ApplicationSet starts the fan-out.
+patch_argocd_controller_resources() {
+  local manifest=apps/gitops-config/manifests/argocd.yaml resources
+  # The ai-grid.dev/read label only exists in --local's stdout; it is never applied to the live CR.
+  resources=$(KUBECONFIG=/dev/null oc label --local -f "$manifest" ai-grid.dev/read=true \
+    -o jsonpath='{.spec.controller.resources}')
+  if [ -z "$resources" ]; then
+    echo "ERROR: no spec.controller.resources in ${manifest}." >&2
+    return 1
+  fi
+  echo "Setting the Argo CD application controller's resources from ${manifest}..."
+  oc patch argocd openshift-gitops -n openshift-gitops --type merge \
+    -p "{\"spec\":{\"controller\":{\"resources\":${resources}}}}"
+}
+patch_argocd_controller_resources
+
+# The patch only changes the CR; the GitOps operator then rolls the controller's StatefulSet. Wait
+# (ARGOCD_CONTROLLER_TIMEOUT_SECONDS, default 600) until its pod template carries the manifest's memory
+# limit and the rollout is done, so the fan-out doesn't start on the old limit.
+wait_for_argocd_controller_resources() {
+  local manifest=apps/gitops-config/manifests/argocd.yaml sts=openshift-gitops-application-controller want got
+  timeout="${ARGOCD_CONTROLLER_TIMEOUT_SECONDS:-600}"
+  poll="${ARGOCD_POLL_SECONDS:-5}"
+  deadline=$((SECONDS + timeout))
+  want=$(KUBECONFIG=/dev/null oc label --local -f "$manifest" ai-grid.dev/read=true \
+    -o jsonpath='{.spec.controller.resources.limits.memory}')
+  if [ -z "$want" ]; then
+    echo "ERROR: no spec.controller.resources.limits.memory in ${manifest}." >&2
+    return 1
+  fi
+  echo "Waiting for statefulset/${sts} to run with memory limit ${want}..."
+  while :; do
+    got=$(oc -n openshift-gitops get statefulset "$sts" \
+      -o jsonpath='{.spec.template.spec.containers[?(@.name=="argocd-application-controller")].resources.limits.memory}' 2>/dev/null) || got=
+    [ "$got" = "$want" ] && break
+    remaining=$((deadline - SECONDS))
+    if [ "$remaining" -le 0 ]; then
+      echo "ERROR: statefulset/${sts} memory limit is '${got}', not ${want}, after ${timeout}s; set ARGOCD_CONTROLLER_TIMEOUT_SECONDS to wait longer." >&2
+      return 1
+    fi
+    if [ "$poll" -lt "$remaining" ]; then sleep "$poll"; else sleep "$remaining"; fi
+  done
+  remaining=$((deadline - SECONDS)); [ "$remaining" -gt 0 ] || remaining=1
+  if ! oc -n openshift-gitops rollout status "statefulset/${sts}" --timeout="${remaining}s"; then
+    echo "ERROR: statefulset/${sts} did not finish rolling out within ${timeout}s; set ARGOCD_CONTROLLER_TIMEOUT_SECONDS to wait longer." >&2
+    return 1
+  fi
+}
+wait_for_argocd_controller_resources
+
 oc apply -f "bootstrap/${profile:+${profile}/}applicationset.yaml"
 oc apply -f bootstrap/openshift-gitops-admin.yaml
 oc patch consoles.operator.openshift.io cluster --patch '{ "spec": { "plugins": ["gitops-plugin"] } }' --type=merge

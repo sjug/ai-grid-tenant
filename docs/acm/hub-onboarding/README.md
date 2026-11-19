@@ -38,7 +38,7 @@ export RHOAI_STAGE_PULL_SECRET=<base64 of user:password for registry.stage.redha
 ./bootstrap.sh
 ```
 
-bootstrap.sh installs the openshift-gitops-operator Subscription, waits for the Argo CRDs, and applies a root ApplicationSet over apps/*/application.yaml. Argo then syncs every app from the fork.
+bootstrap.sh installs the openshift-gitops-operator Subscription, waits for the Argo CRDs, sets the Argo CD application controller's resources from apps/gitops-config/manifests/argocd.yaml, and then applies a root ApplicationSet over apps/*/application.yaml. Argo then syncs every app from the fork.
 
 After `bootstrap.sh` completes, run this manual check. `READY` confirms registration
 prerequisites only; it does not check MultiClusterHub completion or Argo cluster

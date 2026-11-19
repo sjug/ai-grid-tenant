@@ -56,4 +56,33 @@ done
 grep -q 'GRID_TENANT_1_BROKER_CLIENT_SECRET' "$tmpdir/jobs.yaml"
 grep -q 'GRID_TENANT_2_BROKER_CLIENT_SECRET' "$tmpdir/jobs.yaml"
 
+# The separately rendered Jobs must mount the exact ConfigMaps installed by
+# the initial apply and run the same containers as the default Argo hooks.
+kubectl kustomize "$here/../overlays/default" > "$tmpdir/default.yaml"
+python3 - "$tmpdir" <<'PY'
+import os
+import sys
+import yaml
+
+def resources(name):
+    with open(os.path.join(sys.argv[1], name + ".yaml")) as stream:
+        return {(d["kind"], d["metadata"]["name"]): d for d in yaml.safe_load_all(stream) if d}
+
+initial = resources("initial")
+argo = resources("default")
+for key, job in resources("jobs").items():
+    if key[0] != "Job":
+        continue
+    pod = job["spec"]["template"]["spec"]
+    assert pod == argo[key]["spec"]["template"]["spec"], key
+    for volume in pod["volumes"]:
+        if "configMap" in volume:
+            assert ("ConfigMap", volume["configMap"]["name"]) in initial
+    for container in pod["containers"]:
+        for variable in container["env"]:
+            secret = variable.get("valueFrom", {}).get("secretKeyRef")
+            if secret and secret["name"].endswith("-realm-sync"):
+                assert ("ExternalSecret", secret["name"]) in initial
+PY
+
 echo "keycloak direct install tests: 1 ok, 0 failed"

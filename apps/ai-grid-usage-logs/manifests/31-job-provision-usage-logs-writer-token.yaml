@@ -20,7 +20,10 @@ metadata:
   annotations:
     argocd.argoproj.io/hook: Sync
     argocd.argoproj.io/sync-wave: "4"
-    argocd.argoproj.io/hook-delete-policy: HookSucceeded
+    # BeforeHookCreation as well: Argo CD names this hook once per sync
+    # operation and its automatic retries reuse the name, so a failed Job
+    # would stay and fail every retry even after the cause is gone.
+    argocd.argoproj.io/hook-delete-policy: HookSucceeded,BeforeHookCreation
 spec:
   template:
     spec:

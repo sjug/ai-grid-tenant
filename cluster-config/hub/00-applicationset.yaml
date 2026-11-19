@@ -44,3 +44,15 @@ spec:
         automated:
           prune: true
           selfHeal: true
+  # A managed cluster renders nothing (hubResources.enabled is false). Without
+  # allowEmpty Argo CD refuses the automated sync that prunes what an earlier
+  # chart created there, such as the per-user cluster-admin bindings, and the
+  # Application stays OutOfSync. The hub keeps the protection: an empty hub
+  # render would prune its admin Group, binding and Submariner policy. A
+  # registration counts as the hub by its local-cluster label, its name or an
+  # in-cluster server.
+  templatePatch: |
+    spec:
+      syncPolicy:
+        automated:
+          allowEmpty: {{ and (ne (index .metadata.labels "local-cluster") "true") (ne .name "local-cluster") (ne .server "https://kubernetes.default.svc") }}

@@ -23,7 +23,10 @@
 #
 # Sync wave 4 runs after provisioning RBAC (wave 3) and before the spoke
 # Policy (wave 5), which needs this Secret to become Healthy. The Job waits
-# for the store Route if the Loki operator is still reconciling it.
+# for the store Route if the Loki operator is still reconciling it: 10 minutes
+# per pod, so up to about 30 minutes per Job with backoffLimit 2. If the Route
+# takes longer, the Job fails and the Application's sync retry runs a fresh Job
+# (see hook-delete-policy).
 apiVersion: batch/v1
 kind: Job
 metadata:
@@ -32,7 +35,10 @@ metadata:
   annotations:
     argocd.argoproj.io/hook: Sync
     argocd.argoproj.io/sync-wave: "4"
-    argocd.argoproj.io/hook-delete-policy: HookSucceeded
+    # BeforeHookCreation as well: Argo CD names this hook once per sync
+    # operation and its automatic retries reuse the name, so a failed Job
+    # would stay and fail every retry even after the cause is gone.
+    argocd.argoproj.io/hook-delete-policy: HookSucceeded,BeforeHookCreation
 spec:
   template:
     spec:

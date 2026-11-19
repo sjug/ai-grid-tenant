@@ -103,7 +103,20 @@ def env_sources(container):
     return sources
 
 
-def check_hook_pod(job, name):
+def check_hook_container(pod, container):
+    name = container["name"]
+    assert "envFrom" not in container, name
+    assert container["securityContext"] == {
+        "allowPrivilegeEscalation": False,
+        "readOnlyRootFilesystem": True,
+        "capabilities": {"drop": ["ALL"]},
+    }, name
+    for mount in container["volumeMounts"]:
+        if "configMap" in volumes(pod)[mount["name"]]:
+            assert mount["readOnly"] is True, (name, mount)
+
+
+def check_hook_pod(job, name, companions=()):
     annotations = job["metadata"]["annotations"]
     assert annotations["argocd.argoproj.io/hook"] == "PostSync", name
     assert set(annotations["argocd.argoproj.io/hook-delete-policy"].split(",")) == {
@@ -114,22 +127,14 @@ def check_hook_pod(job, name):
     assert pod["enableServiceLinks"] is False, name
     assert "serviceAccountName" not in pod, name
     assert pod["securityContext"] == {"seccompProfile": {"type": "RuntimeDefault"}}, name
-    assert len(pod["containers"]) == 1 and "initContainers" not in pod, name
-    container = pod["containers"][0]
-    assert "envFrom" not in container, name
-    assert container["securityContext"] == {
-        "allowPrivilegeEscalation": False,
-        "readOnlyRootFilesystem": True,
-        "capabilities": {"drop": ["ALL"]},
-    }, name
+    assert {c["name"] for c in pod["containers"]} == {name, *companions} and "initContainers" not in pod, name
+    for container in pod["containers"]:
+        check_hook_container(pod, container)
     for volume in pod["volumes"]:
         assert "secret" not in volume and "projected" not in volume, (name, volume)
         if "emptyDir" in volume:
             assert volume["emptyDir"]["medium"] == "Memory", (name, volume)
-    for mount in container["volumeMounts"]:
-        if "configMap" in volumes(pod)[mount["name"]]:
-            assert mount["readOnly"] is True, (name, mount)
-    return pod, container
+    return pod, next(c for c in pod["containers"] if c["name"] == name)
 
 
 TENANT_REALM_FILES = ("grid-tenant-1-idp-realm.json", "grid-tenant-2-idp-realm.json")
@@ -258,6 +263,16 @@ def check_overlay(overlay, with_examples, with_hooks):
     assert "realmRoles" not in account
 
     jobs = [d for d in documents if d.get("kind") == "Job"]
+    example_credentials = {}
+    for n in (1, 2):
+        secret_name = "grid-tenant-%d-realm-sync" % n
+        if with_examples:
+            secret = find(documents, "ExternalSecret", secret_name)["spec"]
+            assert secret["refreshPolicy"] == "CreatedOnce" and secret["target"]["name"] == secret_name
+            assert secret["dataFrom"][0]["sourceRef"]["generatorRef"]["name"] == "keycloak-realm-sync-client-secret"
+            example_credentials["GRID_TENANT_%d_SYNC_CLIENT_SECRET" % n] = ("secretKeyRef", secret_name, "password")
+        else:
+            assert not any(d["metadata"]["name"] == secret_name for d in documents)
     if not with_hooks:
         assert jobs == [], overlay
     else:
@@ -275,10 +290,12 @@ def check_overlay(overlay, with_examples, with_hooks):
         assert bootstrap["command"] == [
             "python3", "/opt/keycloak/realm-scripts/sync-saas-realm.py", "bootstrap",
             "/opt/keycloak/realm-import-source/saas-realm.json"], bootstrap["command"]
+        assert bootstrap.get("args", []) == ([f[:-len("-realm.json")] for f in TENANT_REALM_FILES] if with_examples else [])
         assert env_sources(bootstrap) == {
             "KC_BOOTSTRAP_ADMIN_USERNAME": ("secretKeyRef", "keycloak-secrets", "KC_BOOTSTRAP_ADMIN_USERNAME"),
             "KC_BOOTSTRAP_ADMIN_PASSWORD": ("secretKeyRef", "keycloak-secrets", "KC_BOOTSTRAP_ADMIN_PASSWORD"),
             SYNC_SECRET: SOURCES[SYNC_SECRET],
+            **example_credentials,
         }, env_sources(bootstrap)
         assert KEYCLOAK_URL in bootstrap["env"]
         assert {v["name"] for v in bootstrap["env"]} == {"PYTHONDONTWRITEBYTECODE", "KEYCLOAK_URL"} | \
@@ -289,7 +306,22 @@ def check_overlay(overlay, with_examples, with_hooks):
 
         # The sync Job: exactly the saas file's placeholders and the sync
         # client's secret, each from where it lives; no admin key.
-        sync_pod, sync = check_hook_pod(sync_job, "sync")
+        companions = ("sync-tenant-1", "sync-tenant-2") if with_examples else ()
+        sync_pod, sync = check_hook_pod(sync_job, "sync", companions)
+        for n, name in enumerate(companions, 1):
+            container = next(c for c in sync_pod["containers"] if c["name"] == name)
+            realm = "grid-tenant-%d-idp" % n
+            assert container["command"] == [
+                "python3", "/opt/keycloak/realm-scripts/sync-saas-realm.py", "sync-example",
+                realm, "/opt/keycloak/realm-import-source/%s-realm.json" % realm]
+            assert container["image"] == sync["image"]
+            password_key = "GRID_TENANT_%d_TEST_USER_PASSWORD" % n
+            sync_key = "GRID_TENANT_%d_SYNC_CLIENT_SECRET" % n
+            assert env_sources(container) == {password_key: ("secretKeyRef", "keycloak-secrets", password_key),
+                                               sync_key: example_credentials[sync_key]}
+            assert KEYCLOAK_URL in container["env"]
+            assert {e["name"] for e in container["env"]} == {password_key, sync_key, "KEYCLOAK_URL", "PYTHONDONTWRITEBYTECODE"}
+            assert {m["name"] for m in container["volumeMounts"]} == {"realm-import-source", "realm-scripts"}
         sync_script = script(sync)
         assert "bash /opt/keycloak/realm-scripts/render-realm.sh" in sync_script
         assert "< /opt/keycloak/realm-import-source/saas-realm.json > /work/saas-realm.json" in sync_script
@@ -335,7 +367,7 @@ check_overlay("default", with_examples=True, with_hooks=True)
 check_overlay("direct", with_examples=True, with_hooks=False)
 
 # The sync script never overwrites by re-creation, and deletes only the
-# mappers of the file's identity providers that the file dropped.
+# mappers of the file's identity providers or an optional scope being promoted.
 assert '"ifResourceExists"] = "SKIP"' in SYNC_PY
 assert "OVERWRITE" not in SYNC_PY
 deleting = set()
@@ -345,5 +377,5 @@ for function in ast.parse(SYNC_PY).body:
             if isinstance(node, ast.Call) and node.args and isinstance(node.args[0], ast.Constant) \
                     and node.args[0].value == "DELETE":
                 deleting.add(function.name)
-assert deleting == {"delete_dropped_identity_provider_mappers"}, deleting
+assert deleting == {"delete_dropped_identity_provider_mappers", "ensure_default_scopes"}, deleting
 print("keycloak realm import render checks: ok")

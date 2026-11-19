@@ -4,6 +4,7 @@ kind: Component
 # Enabled by the default overlay. The core overlay omits it.
 resources:
   - signing-keys-grid.yaml
+  - realm-sync-secrets.yaml
 configMapGenerator:
   # The saas realm with the example identity providers and organizations,
   # and the example tenant IdP realms they broker to: each imported only when

@@ -44,6 +44,8 @@ sync-saas-realm.py sync RENDERED_REALM_FILE
     Environment: KEYCLOAK_URL, KEYCLOAK_CLIENT_ID and
     KEYCLOAK_REALM_SYNC_CLIENT_SECRET.
 
+With the examples component, bootstrap also takes the configured example realm
+names. sync-example REALM RAW_REALM_FILE runs with only that realm's secrets.
 It prints no secret value. It runs on Python 3.6.
 """
 
@@ -54,10 +56,21 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import uuid
 
 REALM = "saas"
 SYNC_CLIENT = "keycloak-realm-sync"
 SYNC_CLIENT_SECRET_PLACEHOLDER = "${KEYCLOAK_REALM_SYNC_CLIENT_SECRET}"
+EXAMPLE_CLIENT = "keycloak-example-realm-sync"
+OWNER_ATTRIBUTE = "ai-grid.example-realm-sync"
+EXAMPLE_KEYS = {"grid-tenant-1-idp": "GRID_TENANT_1", "grid-tenant-2-idp": "GRID_TENANT_2"}
+EXAMPLE_ROLES = ["manage-realm", "manage-users", "manage-clients"]
+EXAMPLE_CLIENT_SETTINGS = {
+    "protocol": "openid-connect", "clientAuthenticatorType": "client-secret",
+    "enabled": True, "publicClient": False, "serviceAccountsEnabled": True,
+    "standardFlowEnabled": False, "directAccessGrantsEnabled": False, "implicitFlowEnabled": False,
+    "fullScopeAllowed": True,
+}
 UNIQUE_USER_FLOW = "User creation or linking"
 NOT_SETTINGS = {"id", "realm", "keycloakVersion"}
 PARTIAL_IMPORT_KEYS = ("clients", "identityProviders", "identityProviderMappers", "users", "groups", "roles")
@@ -112,17 +125,17 @@ def error_message(data):
     return ""
 
 
-def wait_for_keycloak(timeout=600):
+def wait_for_keycloak(timeout=600, realm=REALM):
     deadline = time.time() + timeout
     while True:
         try:
-            status, _ = request("GET", "/realms/" + REALM)
+            status, _ = request("GET", "/realms/" + realm)
         except OSError:
             status = None
         if status == 200:
             return
         if time.time() > deadline:
-            raise Failure("realm %s isn't served at %s after %ds" % (REALM, keycloak_url(), timeout))
+            raise Failure("realm %s isn't served at %s after %ds" % (realm, keycloak_url(), timeout))
         time.sleep(5)
 
 
@@ -133,11 +146,11 @@ def token(realm, form):
     return None, status, error_message(data)
 
 
-def sync_client_token():
-    return token(REALM, {
+def sync_client_token(realm=REALM, client_id=SYNC_CLIENT, secret_key="KEYCLOAK_REALM_SYNC_CLIENT_SECRET"):
+    return token(realm, {
         "grant_type": "client_credentials",
-        "client_id": SYNC_CLIENT,
-        "client_secret": os.environ["KEYCLOAK_REALM_SYNC_CLIENT_SECRET"],
+        "client_id": client_id,
+        "client_secret": os.environ[secret_key],
     })
 
 
@@ -154,21 +167,26 @@ def bootstrap_admin_token():
 
 
 class Admin:
-    """The saas realm's Admin REST API with one access token."""
+    """One realm's Admin REST API with one access token."""
 
-    def __init__(self, access_token):
+    def __init__(self, access_token, realm=REALM):
         self.access_token = access_token
+        self.realm = realm
 
     def call(self, method, path, body=None):
-        status, data = request(method, "/admin/realms/%s%s" % (REALM, path), token=self.access_token, body=body)
+        status, data = request(method, "/admin/realms/%s%s" % (self.realm, path), token=self.access_token, body=body)
         if status not in (200, 201, 204):
-            raise HTTPFailure("%s /admin/realms/%s%s: HTTP %d %s" % (method, REALM, path, status, error_message(data)),
+            # Import errors can echo fields from a fixture containing initial credentials.
+            detail = error_message(data) if self.realm == REALM else ""
+            raise HTTPFailure("%s /admin/realms/%s%s: HTTP %d %s" % (method, self.realm, path, status, detail),
                               status)
         return data
 
-    def client(self, client_id):
+    def client(self, client_id, required=True):
         found = [c for c in self.call("GET", "/clients?clientId=" + quote(client_id)) if c["clientId"] == client_id]
         if not found:
+            if not required:
+                return None
             raise Failure("client %s not found" % client_id)
         return found[0]
 
@@ -369,15 +387,21 @@ def sync_client_definition(raw_realm):
     return {"clients": [client], "users": users}
 
 
-def sync_client_problem(user):
-    """None when keycloak-realm-sync signs in and its service account holds the roles user gives it; else why not."""
-    access_token, status, message = sync_client_token()
+def sync_client_problem(user, realm=REALM, secret_key="KEYCLOAK_REALM_SYNC_CLIENT_SECRET"):
+    """Check a fresh client login and its effective realm-local role mappings."""
+    client_id = user["serviceAccountClientId"]
+    access_token, status, message = sync_client_token(realm, client_id, secret_key)
     if not access_token:
+        detail = " %s" % message if realm == REALM else ""
         if status in (400, 401):
-            return "%s can't sign in (HTTP %s %s)" % (SYNC_CLIENT, status, message)
-        raise Failure("%s can't sign in: HTTP %s %s" % (SYNC_CLIENT, status, message))
-    admin = Admin(access_token)
+            return "%s can't sign in (HTTP %s%s)" % (client_id, status, detail)
+        raise Failure("%s can't sign in: HTTP %s%s" % (client_id, status, detail))
+    admin = Admin(access_token, realm)
     try:
+        if client_id == EXAMPLE_CLIENT:
+            client = owned_example_client(admin)
+            if client is None or any(client.get(k) != v for k, v in EXAMPLE_CLIENT_SETTINGS.items()):
+                return "example sync client settings need repair"
         missing = []
         for _, mapping_path, names in role_mappings(admin, user):
             have = {role["name"] for role in admin.call("GET", mapping_path + "/composite")}
@@ -385,9 +409,9 @@ def sync_client_problem(user):
     except HTTPFailure as err:
         if err.status != 403:
             raise
-        return "%s signs in but may not read its own roles" % SYNC_CLIENT
+        return "%s signs in but may not read its own roles" % client_id
     if missing:
-        return "%s signs in but lacks %s" % (SYNC_CLIENT, ", ".join(sorted(missing)))
+        return "%s signs in but lacks %s" % (client_id, ", ".join(sorted(missing)))
     return None
 
 
@@ -438,11 +462,176 @@ def sync(path):
     print("realm %s: the file's resources are applied" % REALM)
 
 
+def example_file(realm, path):
+    if realm not in EXAMPLE_KEYS:
+        raise Failure("unconfigured example realm")
+    with open(path) as stream:
+        fixture = json.load(stream)
+    if fixture.get("realm") != realm:
+        raise Failure("fixture does not match example realm %s" % realm)
+    return fixture
+
+
+def owned_example_client(admin):
+    client = admin.client(EXAMPLE_CLIENT, required=False)
+    if client is None:
+        return None
+    live = admin.call("GET", "/clients/" + client["id"])
+    if (live.get("attributes") or {}).get(OWNER_ATTRIBUTE) != "true":
+        raise Failure("%s: reserved sync client is already in use" % admin.realm)
+    return live
+
+
+def bootstrap_example(realm):
+    secret_key = EXAMPLE_KEYS[realm] + "_SYNC_CLIENT_SECRET"
+    account = {"username": "service-account-" + EXAMPLE_CLIENT, "serviceAccountClientId": EXAMPLE_CLIENT,
+               "clientRoles": {"realm-management": EXAMPLE_ROLES}}
+    wait_for_keycloak(realm=realm)
+    if sync_client_problem(account, realm, secret_key) is None:
+        return
+    admin = Admin(bootstrap_admin_token(), realm)
+    live = owned_example_client(admin)
+    wanted = dict(live or {}, **EXAMPLE_CLIENT_SETTINGS)
+    attributes = dict(wanted.get("attributes") or {})
+    attributes[OWNER_ATTRIBUTE] = "true"
+    wanted.update(clientId=EXAMPLE_CLIENT, attributes=attributes, secret=os.environ[secret_key])
+    if live is None:
+        admin.call("POST", "/clients", wanted)
+    else:
+        admin.call("PUT", "/clients/" + live["id"], wanted)
+    grant_service_account_roles(admin, {"users": [account]})
+    problem = sync_client_problem(account, realm, secret_key)
+    if problem:
+        raise Failure("%s: %s" % (realm, problem))
+    print("%s: example sync client ready" % realm)
+
+
+def get_if_present(admin, path):
+    try:
+        return admin.call("GET", path)
+    except HTTPFailure as err:
+        if err.status != 404:
+            raise
+        return None
+
+
+def fixture_user(admin, user):
+    username = user["username"]
+    try:
+        if str(uuid.UUID(user["id"])) != user["id"]:
+            raise ValueError()
+    except (KeyError, ValueError):
+        raise Failure("%s: %s needs a fixed UUID" % (admin.realm, username))
+    live = get_if_present(admin, "/users/" + user["id"])
+    if live is not None:
+        if live["username"] != username or live["id"] != user["id"]:
+            raise Failure("%s: fixture identity mismatch for %s" % (admin.realm, username))
+        return live
+    for field in ("username", "email"):
+        if user.get(field) and admin.call("GET", "/users?exact=true&%s=%s" % (field, quote(user[field]))):
+            raise Failure("%s: %s conflicts with an existing %s" % (admin.realm, username, field))
+    return None
+
+
+def ensure_fixture_groups(admin, groups):
+    ids = {}
+    for group in groups:
+        name = group["name"]
+        if not name or "/" in name or group.get("subGroups"):
+            raise Failure("example groups must be named top-level groups")
+        path = "/" + name
+        endpoint = "/group-by-path/" + quote(name)
+        live = get_if_present(admin, endpoint)
+        if live is None:
+            admin.call("POST", "/groups", {"name": name})
+            live = admin.call("GET", endpoint)
+        if live["path"] != path:
+            raise Failure("%s: unexpected group path for %s" % (admin.realm, name))
+        ids[path] = live["id"]
+    return ids
+
+
+def create_fixture_user(admin, user):
+    password_key = EXAMPLE_KEYS[admin.realm] + "_TEST_USER_PASSWORD"
+    credentials = []
+    for credential in user["credentials"]:
+        if credential["type"] != "password" or credential["value"] != "${%s}" % password_key:
+            raise Failure("%s: unexpected credential for %s" % (admin.realm, user["username"]))
+        credentials.append(dict(credential, value=os.environ[password_key]))
+    role_mappings_to_check = []
+    for client_id, names in user.get("clientRoles", {}).items():
+        client_uuid = admin.client(client_id)["id"]
+        for name in names:
+            admin.call("GET", "/clients/%s/roles/%s" % (client_uuid, quote(name)))
+        role_mappings_to_check.append((client_uuid, names))
+    add_missing(admin, {"users": [dict(user, credentials=credentials)]})
+    if fixture_user(admin, user) is None:
+        raise Failure("%s: import did not create %s with its fixture ID" % (admin.realm, user["username"]))
+    for client_uuid, names in role_mappings_to_check:
+        mappings = admin.call("GET", "/users/%s/role-mappings/clients/%s" % (user["id"], client_uuid))
+        if not set(names) <= {role["name"] for role in mappings}:
+            raise Failure("%s: imported user %s lacks declared roles" % (admin.realm, user["username"]))
+
+
+def ensure_default_scopes(admin, broker, names):
+    path = "/clients/" + broker["id"]
+    defaults = path + "/default-client-scopes"
+    missing = set(names) - {s["name"] for s in admin.call("GET", defaults)}
+    if not missing:
+        return
+    scopes = {s["name"]: s["id"] for s in admin.call("GET", "/client-scopes")}
+    if not missing <= scopes.keys():
+        raise Failure("%s: missing realm scopes %s" % (admin.realm, sorted(missing - scopes.keys())))
+    optional = {s["name"] for s in admin.call("GET", path + "/optional-client-scopes")}
+    for name in sorted(missing):
+        # Keycloak ignores the default PUT if the same optional link still exists.
+        if name in optional:
+            admin.call("DELETE", path + "/optional-client-scopes/" + scopes[name])
+        admin.call("PUT", defaults + "/" + scopes[name])
+    if not set(names) <= {s["name"] for s in admin.call("GET", defaults)}:
+        raise Failure("%s: broker default scopes did not converge" % admin.realm)
+
+
+def sync_example(realm, fixture):
+    wait_for_keycloak(realm=realm)
+    access_token, status, _ = sync_client_token(realm, EXAMPLE_CLIENT, EXAMPLE_KEYS[realm] + "_SYNC_CLIENT_SECRET")
+    if not access_token:
+        raise Failure("%s: sync client login returned HTTP %s" % (realm, status))
+    admin = Admin(access_token, realm)
+    broker = admin.client("saas-broker")
+    desired = [c for c in fixture["clients"] if c["clientId"] == "saas-broker"]
+    if len(desired) != 1:
+        raise Failure("%s: fixture must contain one saas-broker client" % realm)
+    # Validate every identity before granting any access; passwords are create-only.
+    missing = [user for user in fixture["users"] if fixture_user(admin, user) is None]
+    groups = ensure_fixture_groups(admin, fixture["groups"])
+    for user in fixture["users"]:
+        if set(user.get("groups", [])) - groups.keys():
+            raise Failure("%s: undeclared group for %s" % (realm, user["username"]))
+    for user in missing:
+        create_fixture_user(admin, user)
+    for user in fixture["users"]:
+        for path in user.get("groups", []):
+            # Keycloak's join is idempotent and preserves all other memberships.
+            admin.call("PUT", "/users/%s/groups/%s" % (user["id"], groups[path]))
+    ensure_default_scopes(admin, broker, desired[0].get("defaultClientScopes", []))
+    print("%s: fixture users, memberships and broker scopes reconciled" % realm)
+
+
 def main(argv):
-    commands = {"bootstrap": bootstrap, "sync": sync}
-    if len(argv) != 3 or argv[1] not in commands:
-        raise Failure("usage: sync-saas-realm.py bootstrap REALM_FILE | sync RENDERED_REALM_FILE")
-    commands[argv[1]](argv[2])
+    if len(argv) >= 3 and argv[1] == "bootstrap":
+        for realm in argv[3:]:
+            example_file(realm, os.path.join(os.path.dirname(argv[2]), realm + "-realm.json"))
+        bootstrap(argv[2])
+        for realm in argv[3:]:
+            bootstrap_example(realm)
+    elif len(argv) == 3 and argv[1] == "sync":
+        sync(argv[2])
+    elif len(argv) == 4 and argv[1] == "sync-example":
+        sync_example(argv[2], example_file(argv[2], argv[3]))
+    else:
+        raise Failure("usage: bootstrap REALM_FILE [EXAMPLE_REALM ...] | sync RENDERED_REALM_FILE | "
+                      "sync-example EXAMPLE_REALM RAW_REALM_FILE")
 
 
 if __name__ == "__main__":

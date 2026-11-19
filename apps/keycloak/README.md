@@ -5,11 +5,10 @@ bootstrap ApplicationSet discovers `apps/keycloak/application.yaml` automaticall
 
 ## Deployment scope
 
-This identity change requires a fresh installation. The code is not yet deployed.
-Start with new `saas` and example tenant realms before onboarding organizations
-or users. Upgrades of populated realms and migration procedures are outside
-the scope of this change. Realm sync initializes the broker settings and
-maintains Git-owned configuration after installation.
+Realm import initializes new installations. PostSync hooks also update existing
+broker settings and, when the examples component is enabled, reconcile the
+example tenant fixtures. Migration of existing broker identities or
+organizations is a separate operation.
 
 ## Install profiles
 
@@ -190,21 +189,19 @@ Every realm holds runtime data:
 
 A new pod imports nothing that exists, so the Deployment rolls without a gap.
 
-An edit to `saas-realm.json` reaches an existing realm through two Argo CD
-PostSync hooks, which run in sync-wave order after every sync of this
-Application (a change under `apps/keycloak`, or a self-heal), once the
-Keycloak Deployment is healthy:
+Two Argo CD PostSync hooks run in wave order after a full Application sync,
+once Keycloak is healthy. They apply edits to `saas-realm.json` and, when the
+examples component is enabled, to the example tenant fixtures.
 
 1. `keycloak-realm-sync-bootstrap` checks that the `keycloak-realm-sync`
    client signs in and that its service account holds the roles the file gives
-   it. If so it exits without signing in as anyone else. If not (a realm
-   imported before the client was in the file, or a client secret generated
-   again), it signs in to `master` as the bootstrap admin and creates or
-   repairs that client and its roles, nothing else.
-2. `keycloak-saas-realm-sync` renders the file with the same script, signs in
+   it. If required, it signs in to `master` as the bootstrap admin and
+   repairs the client and its roles. It then checks each enabled example realm
+   with that realm's credential and repairs its sync client if needed.
+2. The SaaS container in `keycloak-saas-realm-sync` renders the file, signs in
    as `keycloak-realm-sync`, and runs
-   `base/manifests/scripts/sync-saas-realm.py sync`, which deletes and
-   re-creates nothing:
+   `base/manifests/scripts/sync-saas-realm.py sync`. The example containers
+   apply the narrower [tenant fixture rules](#example-tenant-identity-providers).
 
 | In `saas-realm.json` | What the sync does |
 | --- | --- |
@@ -233,7 +230,7 @@ re-creates each existing client and identity provider, which gives them new
 ids, ends the clients' sessions and drops the identity providers' organization
 links.
 
-These are not reconciled; plan them as a change of their own:
+The following exclusions apply to the SaaS broker realm:
 
 - Removals, apart from client protocol mappers and the file's identity
   providers' mappers. A client, identity provider, user, group, role, client
@@ -259,11 +256,21 @@ single Secret keys, never a whole Secret:
   `KEYCLOAK_REALM_SYNC_CLIENT_SECRET` to check the client. It reads only the
   `keycloak-realm-sync` client and its service account from the unrendered
   realm file.
-- `keycloak-saas-realm-sync` gets the values of the `saas` realm file's
+- The `sync` container in `keycloak-saas-realm-sync` gets the values of the `saas` realm file's
   placeholders (the `core` file's, plus the examples component's identity
   provider URLs and broker secrets) and `KEYCLOAK_REALM_SYNC_CLIENT_SECRET`,
   and no admin credential. It writes the rendered file to a memory-backed
   volume.
+
+With examples enabled, the bootstrap Job also checks one confidential
+`keycloak-example-realm-sync` client in each fixture realm. Each has an
+independently generated `CreatedOnce` Secret. A failed client login or missing
+role triggers repair through the bootstrap admin, followed by a fresh client
+login. An existing client with that name and no ownership marker fails the
+hook. The local service account has `manage-realm` for partial import,
+`manage-users` for group joins and `manage-clients` for scope links.
+Each `sync-tenant-N` container in wave 1 receives only its realm's client
+secret and fixture password. It resolves the password in memory on user creation.
 
 `keycloak-realm-sync`'s generated client secret is in the
 `keycloak-realm-sync-secret` Secret. Its service account has the `saas`
@@ -275,7 +282,8 @@ stays for its logs until the next sync replaces it.
 
 `overlays/direct` leaves both hooks out of its first apply because `kubectl`
 does not order them with the Keycloak rollout. `install.sh` runs the same Jobs
-after Keycloak is ready. For later Git edits to `saas`, rerun `apps/keycloak/install.sh`.
+after Keycloak is ready. For later Git edits to the broker or example fixtures,
+rerun `apps/keycloak/install.sh`.
 Each run replaces both Jobs and waits for them in order. The reconciliation
 rules and exclusions above also apply to direct installs.
 
@@ -347,11 +355,27 @@ subscription in the provider console is granted to group names, such as
 Every user in the files has a fixed `id`: it is the `sub` that `saas` links
 the user's brokered account to.
 
-Keycloak imports these example realms only when they do not exist. A fresh
-installation includes tenant-2 Alice, Bob's `ai-grid-bob` membership, and the
-`profile` and `email` client scopes. A later file edit does not update an
-existing example realm. This change provides no upgrade procedure for older
-example realms.
+A full Keycloak Application sync upgrades an existing example realm. It
+creates missing top-level groups and fixture users with their declared UUIDs,
+initial credentials and roles. It adds each declared membership to the matching
+UUID and username. A conflicting identity fails the sync. The hook adds the
+broker's declared default scopes and promotes a matching optional scope when
+needed. Both example brokers receive `profile` and `email`.
+
+Declared memberships are a minimum. An administrator can add groups and
+memberships, change passwords and roles, or disable a fixture user. To retire
+a fixture or revoke a declared membership, remove it from Git first and then
+remove it in Keycloak. A full sync otherwise recreates a missing fixture or
+restores its declared membership. Reverting Git alone leaves prior grants in
+place. The hook preserves broker links, other clients and scopes, signing
+configuration, and users created by administrators. Customer IdPs are outside
+the examples component.
+
+After an upgrade, sign in again as Bob and check that the SaaS token includes
+his organization-qualified `ai-grid-bob` group and the subscribed models are
+visible. Previously issued tokens keep their claims. Use the
+[identity-isolation smoke](../../docs/maas-oidc-smoke/scripts/identity-isolation-smoke.sh)
+to check that the two Alices retain distinct, repeatable broker subjects.
 
 ## Validation
 
@@ -365,7 +389,7 @@ kubectl get configmap keycloak-public-url -n maas-db
 # The last sync, PostSync hooks included, and a hook's log while it runs or after it failed:
 kubectl get applications.argoproj.io keycloak -n openshift-gitops -o jsonpath='{.status.operationState.phase}{"\n"}'
 kubectl logs job/keycloak-realm-sync-bootstrap -n maas-db
-kubectl logs job/keycloak-saas-realm-sync -n maas-db
+kubectl logs job/keycloak-saas-realm-sync -n maas-db --all-containers=true
 ```
 
 Offline checks: `apps/keycloak/tests/realm-import-test.sh` and
@@ -373,6 +397,7 @@ Offline checks: `apps/keycloak/tests/realm-import-test.sh` and
 
 ```sh
 apps/keycloak/tests/direct-install-test.sh
+python3 apps/keycloak/tests/example-realm-sync-test.py
 uv run --with pyyaml python apps/keycloak/tests/identity-contract-test.py
 uv run python apps/keycloak/tests/identity-smoke-inputs-test.py
 ```

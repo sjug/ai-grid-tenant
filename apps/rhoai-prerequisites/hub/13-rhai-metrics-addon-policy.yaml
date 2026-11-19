@@ -1,6 +1,8 @@
 # Register the existing RHOAI exporter job, and the GPU metric the AI Grid dashboards need
 # beyond ACM's default list (charts/ai-grid-o11y/templates/scrapeconfig-dashboard-platform-metrics.yaml),
 # without taking ownership of the addon's other configs.
+# It also sets installStrategy.type Placements and references the observability operator's
+# AddOnDeploymentConfig, so the addon is installable when this Policy creates it first.
 # Removing this musthave policy does not withdraw the tuple; deregistration is a separate migration.
 apiVersion: cluster.open-cluster-management.io/v1beta1
 kind: Placement
@@ -46,6 +48,10 @@ spec:
                   name: multicluster-observability-addon
                 spec:
                   installStrategy:
+                    # If this policy creates the addon before the MultiClusterObservability exists,
+                    # the CRD default type Manual applies and nothing reverts it, so the addon (and
+                    # the Cluster Observability Operator it brings to the hub) is never installed.
+                    type: Placements
                     placements:
                       - name: global
                         namespace: open-cluster-management-global-set
@@ -58,6 +64,13 @@ spec:
                             resource: scrapeconfigs
                             namespace: open-cluster-management-observability
                             name: ai-grid-dashboard-platform-metrics
+                          # The addon refuses to apply its manifests without an AddOnDeploymentConfig
+                          # reference, and when this policy creates the addon it has no default one.
+                          # The observability operator creates this config.
+                          - group: addon.open-cluster-management.io
+                            resource: addondeploymentconfigs
+                            namespace: open-cluster-management-observability
+                            name: multicluster-observability-addon
 ---
 apiVersion: policy.open-cluster-management.io/v1
 kind: PlacementBinding
