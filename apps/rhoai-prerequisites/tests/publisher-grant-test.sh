@@ -16,9 +16,7 @@ check(cr is not None and ns is not None, "both ConfigurationPolicies present")
 objs = [o["objectDefinition"] for o in cr["spec"].get("object-templates", [])] if cr else []
 roles = [o for o in objs if o["kind"] == "ClusterRole"]
 check(len(roles) == 1 and roles[0]["rules"] == [{"apiGroups": ["serving.opendatahub.io"], "resources": ["models"], "verbs": ["post"]}], "ClusterRole grants exactly post on serving.opendatahub.io models")
-# Fork transition: the earlier ClusterRoleBinding stays in the policy until the per-namespace RoleBindings are verified on every site.
-crbs = [o for c in cps for o in [t["objectDefinition"] for t in c["spec"].get("object-templates", [])] if o["kind"] == "ClusterRoleBinding" and o["metadata"]["name"].startswith("odh-model-controller")]
-check(len(crbs) == 1 and crbs[0]["subjects"] == [{"kind": "ServiceAccount", "name": "odh-model-controller", "namespace": "redhat-ods-applications"}], "only the transitional cluster-wide binding of the publisher grant, for the controller alone")
+check(not any(o["kind"] == "ClusterRoleBinding" for c in cps for o in [t["objectDefinition"] for t in c["spec"].get("object-templates", [])] if o["metadata"]["name"].startswith("odh-model-controller-grid-publisher")), "no cluster-wide binding of the publisher grant")
 sel = (ns or {}).get("spec", {}).get("namespaceSelector", {}).get("matchLabels", {})
 check(sel == {"grid.opendatahub.io/allowed": "true"}, "RoleBinding policy selects namespaces by grid.opendatahub.io/allowed=true")
 nobjs = [o["objectDefinition"] for o in ns["spec"].get("object-templates", [])] if ns else []
