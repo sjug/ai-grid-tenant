@@ -5,4 +5,4 @@
 image:
   registry: quay.io
   repository: rhoai/rhoai-fbc-fragment
-  tag: rhoai-3.6@sha256:c9279370d6b45970ac061cba10383dcd32713a9724c4f72c7e949f99f66d7302
+  tag: rhoai-3.6@sha256:2fd9da4d1cb17a47bb8f1f5b869449f61d47f9ec6a66ae5ae9a918ed21c64e83
