@@ -147,6 +147,11 @@ spec:
                           sourceLabels: [__meta_kubernetes_pod_name]
                           targetLabel: pod
                       metricRelabelings:
+                        # Keep only the families the gateway dashboards and performance queries use: the same
+                        # set the ACM platform ScrapeConfig forwards, plus the istio request families.
+                        - action: keep
+                          sourceLabels: [__name__]
+                          regex: 'envoy_cluster_upstream_(cx_active|cx_connect_fail|cx_overflow|cx_total|rq_active|rq_pending_.*|rq_retry.*|rq_time.*|rq_timeout|rq_total|rq_5xx|rq_4xx|rq_completed)|envoy_http_downstream_(cx_active|cx_total|cx_overflow|rq_active|rq_total|rq_completed|rq_time.*)|envoy_listener_downstream_cx_(active|total|overflow)|envoy_listener_.*_downstream_cx_(active|total|overflow)|envoy_listener_manager_.*|envoy_server_(memory_.*|live|concurrency|total_connections|uptime|hot_restart_epoch|version)|envoy_wasm_.*|wasmcustom_.*|envoy_http_ext_proc_.*|envoy_ext_proc_.*|envoy_http_ext_authz_.*|envoy_ext_authz_.*|envoy_cluster_.*ratelimit.*|envoy_http_.*ratelimit.*|envoy_ratelimit_.*|envoy_overload_.*|envoy_cluster_outlier_detection_.*|istio_requests_total|istio_request_duration_milliseconds_(bucket|sum|count)|istio_request_bytes_(bucket|sum|count)|istio_response_bytes_(bucket|sum|count)'
                         # RHOAI already keeps these families for the serving gateway. Keep the MaaS copies.
                         - action: drop
                           sourceLabels: [__name__, gateway_name]
