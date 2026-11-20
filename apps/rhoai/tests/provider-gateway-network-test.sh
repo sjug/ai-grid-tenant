@@ -358,6 +358,15 @@ check "combined consumer admits only the MaaS gateway" "$CONSUMER" combined grid
 check "combined machine network reaches provider only" "$BASE ipBlock=192.0.2.0/24" \
   combined grid-provider-gateway "$COMBINED_NETWORK"
 check "combined consumer excludes machine network" "$CONSUMER" combined grid-gateway "$COMBINED_NETWORK"
+check "hub consumer admits only the MaaS gateway without the perf label" "$CONSUMER" combined grid-gateway \
+  '{"ai-grid/role":"combined","local-cluster":"true"}'
+check "hub consumer admits the perf generators with the perf label" \
+  "$CONSUMER ipBlock=198.18.2.3/32 ipBlock=198.18.2.4/32" combined grid-gateway \
+  '{"ai-grid/role":"combined","local-cluster":"true","aigrid.internal/perf-entry":"enabled"}'
+check "hub consumer closes the perf entry when the label is disabled" "$CONSUMER" combined grid-gateway \
+  '{"ai-grid/role":"combined","local-cluster":"true","aigrid.internal/perf-entry":"disabled"}'
+check "perf label alone admits nothing extra off the hub" "$CONSUMER" combined grid-gateway \
+  '{"ai-grid/role":"combined","aigrid.internal/perf-entry":"enabled"}'
 
 for value in not-a-cidr 192.0.2.1_0 0.0.0.0_0 192.0.2.0_33 256.0.2.0_24 \
              192.0.2.0/24 192.0.2_24 '192.0.2.0_24 '; do

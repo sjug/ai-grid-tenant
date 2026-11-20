@@ -114,10 +114,12 @@ spec:
                       podSelector:
                         matchLabels:
                           gateway.networking.k8s.io/gateway-name: maas-default-gateway
-                    {{- if eq (index .metadata.labels "local-cluster") "true" }}
-                    # Performance campaign (2026-11): the generators d41-h03 and d41-h04 reach the
-                    # hub's consumer gateway through a hand-applied LoadBalancer Service
-                    # (runbooks/perf/grid-gateway-perf-entry.yaml); only those two hosts are admitted.
+                    {{- if and (eq (index .metadata.labels "local-cluster") "true") (eq (index .metadata.labels "aigrid.internal/perf-entry") "enabled") }}
+                    # Performance campaign entry, rendered only while the hub ManagedCluster carries
+                    # aigrid.internal/perf-entry=enabled: the generators d41-h03 and d41-h04 reach the consumer
+                    # gateway through a hand-applied LoadBalancer Service (runbooks/perf/grid-gateway-perf-entry.yaml),
+                    # bypassing MaaS. To close it, set the label to disabled and leave it: ACM does not remove a
+                    # deleted label from the Argo cluster Secret (see the note at the top of this file).
                     - ipBlock:
                         cidr: 198.18.2.3/32
                     - ipBlock:
