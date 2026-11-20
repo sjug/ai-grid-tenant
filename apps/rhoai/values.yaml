@@ -49,6 +49,9 @@ dependencies:
     olm:
       # Keep aligned with the cert-manager compatibility grant in apps/rhoai-prerequisites/hub/12-otel-cert-manager-policy.yaml.
       namespace: openshift-opentelemetry-operator
+      # Leave olm.config unset: that policy adds AI_GRID_CERT_MANAGER_READY to the Subscription's
+      # spec.config.env, and an env list rendered here would make Argo and the policy alternately
+      # replace it, restarting OTel each time.
   # No GPUs on this deployment's sites; the inference profile would install both operators.
   nfd:
     enabled: false
@@ -71,4 +74,4 @@ dependencies:
 global:
   relatedImages:
     - name: RELATED_IMAGE_ODH_PRAXIS_AI_GRID_GATEWAY_IMAGE
-      value: registry.redhat.io/rhoai/odh-praxis-ai-grid-gateway-rhel9@sha256:72d159385fd19572763a1c38c093c0cf72b88812ca0edb73a829b84bd6d94f43
+      value: registry.redhat.io/rhoai/odh-praxis-ai-grid-gateway-rhel9@sha256:6318e9c5e859ede1a1f056c8bc8af27dbbcf8249e1e07a1a06dee729bf9e72f8

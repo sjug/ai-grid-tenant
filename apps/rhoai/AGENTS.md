@@ -39,6 +39,8 @@ RHAI_CHART_DIR=<odh-gitops>/charts/rhai-on-openshift-chart \
   apps/rhoai/tests/dashboard-state-test.sh
 RHAI_CHART_DIR=<odh-gitops>/charts/rhai-on-openshift-chart \
   apps/rhoai/tests/operator-namespaces-test.sh
+RHAI_CHART_DIR=<odh-gitops>/charts/rhai-on-openshift-chart \
+  apps/rhoai/tests/platform-cert-manager-test.sh
 ```
 
 When validating the exact rollout, omit `RHAI_CHART_DIR` so the tests pull the immutable chart

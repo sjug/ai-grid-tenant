@@ -27,7 +27,8 @@ grid-bootstrap image from the same registry. Other managed clusters get nothing:
   Removing the registration policy does not withdraw its addon tuple; that
   requires a separate migration preserving the other configs.
 - temporary cert-manager permissions for the OpenTelemetry operator on enabled Grid sites
-  with role `ingress`, `inference` or `combined`, including an enabled hub.
+  with role `ingress`, `inference` or `combined`, including an enabled hub, and a one-time
+  OTel restart once cert-manager and those permissions are usable.
 - the catalog ServiceAccount's `imagePullSecrets` wiring is managed by
   `apps/rhoai/catalog`; OLM does not update an already-created catalog
   ServiceAccount when `CatalogSource.spec.secrets` changes.
@@ -199,8 +200,25 @@ The compatibility grant uses `openshift-opentelemetry-operator`, explicitly set 
 ServiceAccount subject as well. The grant mirrors [RHOAI's supplemental RBAC](https://github.com/opendatahub-io/odh-observability/blob/f7050b59693a1a12da127cbb757d75fa4d125ef5/charts/odh-observability/templates/opentelemetry-cert-manager-rbac.yaml).
 
 OTel caches cert-manager discovery and authorization at startup; Argo sync waves
-do not guarantee these prerequisites are ready first. If OTel started too early,
-confirm policy compliance, cert-manager API availability and operator permissions.
+do not guarantee these prerequisites are ready first. If OTel starts too early,
+its webhook denies RHOAI's mTLS collector until OTel restarts
+([RHAI-49185](https://redhat.atlassian.net/browse/RHAI-49185)). The same Policy
+restarts it once. The marker fires only once, so the `rhoai-otel-cert-manager-restart`
+ConfigurationPolicy waits for established cert-manager CRDs, an available webhook, and the
+expected OTel RBAC configuration. It checks those objects, not effective authorization:
+- the `issuers`, `certificaterequests` and `certificates` cert-manager CRDs are `Established`;
+- `cert-manager/cert-manager-webhook` has an available replica;
+- the compatibility ClusterRole has a rule covering those resources and the grant's verbs;
+- the ClusterRoleBinding references that ClusterRole and has OTel's ServiceAccount as a subject.
+
+It then adds `AI_GRID_CERT_MANAGER_READY=true` to `spec.config.env` of the
+`opentelemetry-product` Subscription. OLM rolls the operator's Deployments under their
+rolling-update strategy; whether a webhook replica keeps serving depends on the site's replica
+count. Every site gets this one rollout, including sites where OTel started on time. Leave `dependencies.opentelemetry.olm.config`
+unset in `apps/rhoai/values.yaml`, so Argo does not replace that env list.
+
+If a site still denies the collector after that rollout, recover by hand. First confirm
+policy compliance, cert-manager API availability and operator permissions.
 Replace webhook pods one at a time, maintaining a Ready serving replica and
 waiting for each replacement to be Ready; verify webhook
 endpoints, then replace controller pods one at a time and wait for readiness.
@@ -209,8 +227,9 @@ Allow RHOAI to retry, then verify collector/allocator readiness, Certificates,
 Monitoring Ready at its current generation, and collector scrape targets.
 
 Retire the workaround only after equivalent product-owned access is verified.
-The policy retains its RBAC on deletion or deselection; explicitly remove the
-compatibility ClusterRoleBinding and ClusterRole through GitOps during retirement.
+The policy retains its RBAC and the Subscription's env var on deletion or deselection.
+During retirement, remove the compatibility ClusterRoleBinding and ClusterRole through
+GitOps. The leftover env var has no effect.
 
 ## Shared Limitador Redis
 

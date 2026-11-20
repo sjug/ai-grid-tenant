@@ -74,6 +74,72 @@ spec:
                     name: opentelemetry-operator-controller-manager
                     # Keep aligned with dependencies.opentelemetry.olm.namespace in apps/rhoai/values.yaml.
                     namespace: openshift-opentelemetry-operator
+    # RHAI-49185 / RHOAIENG-102688: OTel checks cert-manager's API and its own access to it once, at
+    # startup. The RHOAI chart subscribes OTel and cert-manager in one wave, and the grant above
+    # arrives independently, so OTel can start first and deny every mTLS collector until restarted.
+    # The marker is fixed and fires once, so it checks the prerequisite objects, not just their
+    # existence (it cannot check effective authorization):
+    # every cert-manager CRD the grant covers is Established, cert-manager's webhook has an available
+    # replica, the ClusterRole has a rule covering all of the grant's resources and verbs, and the
+    # binding points at it with OTel's ServiceAccount as a subject. Only then does it add the env var
+    # to OTel's Subscription. OLM rolls the operator's Deployments under their rolling-update
+    # strategy, and the new pods re-run the check. Whether a webhook replica keeps serving depends on
+    # the site's replica count. A site where OTel started after the prerequisites gets the same
+    # single rollout. Retire with the grant above.
+    - objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1
+        kind: ConfigurationPolicy
+        metadata:
+          name: rhoai-otel-cert-manager-restart
+        spec:
+          remediationAction: enforce
+          severity: medium
+          pruneObjectBehavior: None
+          object-templates-raw: |
+            {{- $resources := list "issuers" "certificaterequests" "certificates" }}
+            {{- $verbs := list "create" "get" "list" "watch" "update" "patch" "delete" }}
+            {{- $otel := lookup "operators.coreos.com/v1alpha1" "Subscription" "openshift-opentelemetry-operator" "opentelemetry-product" }}
+            {{- $webhook := lookup "apps/v1" "Deployment" "cert-manager" "cert-manager-webhook" }}
+            {{- $ready := and (not (empty $otel)) (gt (dig "status" "availableReplicas" 0 $webhook | int) 0) }}
+            {{- range $resource := $resources }}
+            {{- $established := false }}
+            {{- range $condition := dig "status" "conditions" (list) (lookup "apiextensions.k8s.io/v1" "CustomResourceDefinition" "" (printf "%s.cert-manager.io" $resource)) }}
+            {{- if and (eq (dig "type" "" $condition) "Established") (eq (dig "status" "" $condition) "True") }}
+            {{- $established = true }}
+            {{- end }}
+            {{- end }}
+            {{- if not $established }}{{- $ready = false }}{{- end }}
+            {{- end }}
+            {{- $roleCovers := false }}
+            {{- range $rule := dig "rules" (list) (lookup "rbac.authorization.k8s.io/v1" "ClusterRole" "" "ai-grid-otel-cert-manager-compat") }}
+            {{- $covers := has "cert-manager.io" (dig "apiGroups" (list) $rule) }}
+            {{- range $resource := $resources }}{{- if not (has $resource (dig "resources" (list) $rule)) }}{{- $covers = false }}{{- end }}{{- end }}
+            {{- range $verb := $verbs }}{{- if not (has $verb (dig "verbs" (list) $rule)) }}{{- $covers = false }}{{- end }}{{- end }}
+            {{- if $covers }}{{- $roleCovers = true }}{{- end }}
+            {{- end }}
+            {{- $binding := lookup "rbac.authorization.k8s.io/v1" "ClusterRoleBinding" "" "ai-grid-otel-cert-manager-compat" }}
+            {{- $bound := and (eq (dig "roleRef" "kind" "" $binding) "ClusterRole") (eq (dig "roleRef" "name" "" $binding) "ai-grid-otel-cert-manager-compat") }}
+            {{- $subject := false }}
+            {{- range $s := dig "subjects" (list) $binding }}
+            {{- if and (eq (dig "kind" "" $s) "ServiceAccount") (eq (dig "name" "" $s) "opentelemetry-operator-controller-manager") (eq (dig "namespace" "" $s) "openshift-opentelemetry-operator") }}
+            {{- $subject = true }}
+            {{- end }}
+            {{- end }}
+            {{- if and $ready $roleCovers $bound $subject }}
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: operators.coreos.com/v1alpha1
+                kind: Subscription
+                metadata:
+                  name: opentelemetry-product
+                  namespace: openshift-opentelemetry-operator
+                spec:
+                  config:
+                    env:
+                      # A fixed value: changing it restarts OTel on every site.
+                      - name: AI_GRID_CERT_MANAGER_READY
+                        value: "true"
+            {{- end }}
 ---
 apiVersion: policy.open-cluster-management.io/v1
 kind: PlacementBinding

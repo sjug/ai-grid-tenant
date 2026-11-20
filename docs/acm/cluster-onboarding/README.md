@@ -66,6 +66,81 @@ as an override when present.
   the default and the chart creates it. `redhat-ods-operator` is owned by the
   prerequisites policy on every site and is not affected by this label.
 
+- If the cluster already runs the cert-manager Operator for Red Hat OpenShift
+  (a CSV `cert-manager-operator.v*` in any namespace:
+  `oc get csv -A | grep cert-manager-operator`), label the ManagedCluster
+  `ai-grid/platform-cert-manager=true` before the role is set.
+  Without the label the rhoai chart installs its own copy of that operator
+  (`dependencies.certManager.enabled: auto`): the namespace
+  `cert-manager-operator`, OperatorGroup `openshift-cert-manager-operator` and
+  Subscription `openshift-cert-manager-operator`. If the platform's
+  OperatorGroup there has another name, the namespace then holds two, and OLM
+  fails the operator's CSV with `TooManyOperatorGroups`. If the platform's
+  operator runs in another namespace, OLM refuses the chart's second copy
+  instead. With the label the chart renders none of the three and the site
+  keeps the platform's operator, which must then provide what KServe and AI
+  Gateway need from cert-manager.
+  `apps/rhoai/tests/platform-cert-manager-test.sh` checks that the label
+  removes only those three objects.
+
+  ```bash
+  oc label managedcluster <name> ai-grid/platform-cert-manager=true
+  ```
+
+  To turn it off later, set the label to `false` rather than removing it: ACM
+  copies ManagedCluster labels onto Argo CD's cluster Secret but never removes
+  one, so a removed label keeps applying. Set it to `false` only after the
+  platform's operator is gone: with `false` the chart renders its namespace,
+  OperatorGroup and Subscription again, and on a cluster that still runs the
+  platform's operator the same conflict returns.
+
+  A site that already joined without the label is managed by the rhoai
+  Application, which has taken over the platform's namespace and Subscription
+  because they carry the chart's names. Labelling it makes Argo CD prune all
+  three, and pruning the namespace removes the platform's operator. Protect the
+  two first, on the site, then label it on the hub.
+
+  > **Not yet run on a cluster.** This switch follows Argo CD's documented
+  > prune behaviour, but nobody has run it on a site yet. Dry-run it on a
+  > throwaway site first: a mistake prunes the platform's cert-manager
+  > Operator.
+
+  ```bash
+  oc annotate namespace cert-manager-operator \
+    argocd.argoproj.io/sync-options=Prune=false
+  oc -n cert-manager-operator annotate subscription.operators.coreos.com \
+    openshift-cert-manager-operator argocd.argoproj.io/sync-options=Prune=false
+  # on the hub:
+  oc label managedcluster <name> ai-grid/platform-cert-manager=true
+  ```
+
+  Argo CD then prunes only the chart's OperatorGroup, and the CSV recovers
+  (`oc -n cert-manager-operator get operatorgroup,csv`). It skips the two
+  annotated objects ("ignored (no prune)") and keeps the Application
+  OutOfSync until they no longer carry its tracking: remove the
+  `argocd.argoproj.io/tracking-id` annotation, or the
+  `app.kubernetes.io/instance` label under label tracking, from each object you
+  annotated.
+
+  While the rhoai Application managed the platform's Subscription, Argo CD
+  kept it at the chart's spec: channel `stable-v1`, `installPlanApproval:
+  Automatic`, source `redhat-operators`. The switch leaves those values in
+  place. If the platform used others, set them back afterwards
+  (`oc -n cert-manager-operator get subscription.operators.coreos.com
+  openshift-cert-manager-operator -o yaml`).
+
+  A platform OperatorGroup that already has the chart's name causes no OLM
+  conflict, but the rhoai Application takes it over too, with the namespace
+  and Subscription. A later render that stops producing them, such as a chart
+  update that no longer installs cert-manager, then prunes the platform's
+  operator. Label such a site as well, with the steps above plus one more
+  annotation before you label it, or Argo CD prunes the only OperatorGroup:
+
+  ```bash
+  oc -n cert-manager-operator annotate operatorgroup \
+    openshift-cert-manager-operator argocd.argoproj.io/sync-options=Prune=false
+  ```
+
 - On managed OpenShift (OSD, ROSA), hub or spoke: the namespaces
   `redhat-ai-grid` and `redhat-ods-operator`, created by a cluster
   administrator before you set the role. The platform's admission webhook

@@ -86,7 +86,16 @@ spec:
               # RHACM own it on the hub.
               - name: dependencies.clusterObservability.enabled
                 value: '{{ ne (index .metadata.labels "local-cluster") "true" | toString }}'
+            # A cluster that already runs the platform's cert-manager Operator carries
+            # ai-grid/platform-cert-manager=true: the chart's copy would add a second
+            # OperatorGroup in cert-manager-operator, and OLM fails the CSV with
+            # TooManyOperatorGroups. Without the label this block renders nothing.
             values: |
+              {{ if eq (index .metadata.labels "ai-grid/platform-cert-manager") "true" -}}
+              dependencies:
+                certManager:
+                  enabled: false
+              {{ end -}}
               components:
                 kserve:
                   gateway:

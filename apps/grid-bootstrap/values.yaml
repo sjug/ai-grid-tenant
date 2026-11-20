@@ -3,7 +3,7 @@ fullnameOverride: grid-bootstrap
 # The payload's enrollment image, matching apps/rhoai/values.yaml.
 image:
   repository: registry.redhat.io/rhoai/odh-praxis-ai-grid-enrollment-rhel9
-  digest: sha256:1bebfcd981eba2360fa2b728b2ea382dc6c87b782a987362bed4e62f9998ae31
+  digest: sha256:f429ae9ac3d65ef99ee79f27fbc48acafa1fe6572cf9334f4a534b7a500200e7
 gridIdentity:
   enabled: true
 ca:

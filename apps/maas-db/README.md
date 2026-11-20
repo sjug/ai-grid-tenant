@@ -52,7 +52,9 @@ the Secret changes resolves the new name at once:
    reconcile on every site. Then run the gate against the hub and every ingress
    or combined site; it checks that `maas-read-r` exists, has ready endpoints
    (the hub's through its ExternalName target) and answers an authenticated
-   read from inside a database pod:
+   read from inside a database pod; on a remote site it also checks that the
+   `maas-read` replica has the hub `maas-db` Cluster's `systemID` (a replica
+   left from an earlier hub does not) and is streaming WAL:
 
    ```sh
    apps/maas-db/check-read-alias.sh <hub kubeconfig> <site kubeconfig>...
