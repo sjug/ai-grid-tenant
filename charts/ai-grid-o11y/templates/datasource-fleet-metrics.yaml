@@ -1,0 +1,31 @@
+# Fleet metrics for the AI Grid dashboards: ACM observability's query proxy on its authenticated
+# HTTPS listener. Separately named so RHOAI keeps cluster-prometheus-datasource for local metrics.
+apiVersion: perses.dev/v1alpha2
+kind: PersesDatasource
+metadata:
+  name: ai-grid-acm-prometheus
+  namespace: redhat-ods-monitoring
+  annotations:
+    argocd.argoproj.io/sync-wave: "3"
+spec:
+  client:
+    tls:
+      enable: true
+      caCert:
+        type: configmap
+        name: openshift-service-ca-bundle
+        namespace: redhat-ods-monitoring
+        certPath: service-ca.crt
+  config:
+    default: false
+    display:
+      name: AI Grid fleet metrics
+    plugin:
+      kind: PrometheusDatasource
+      spec:
+        proxy:
+          kind: HTTPProxy
+          spec:
+            url: https://rbac-query-proxy.open-cluster-management-observability.svc:8443
+            secret: ai-grid-acm-prometheus-secret
+        scrapeInterval: 5m

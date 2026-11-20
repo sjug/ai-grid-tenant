@@ -3,6 +3,9 @@ kind: PersesDatasource
 metadata:
   name: cluster-prometheus-datasource
   namespace: redhat-ods-monitoring
+  annotations:
+    # Owned by RHOAI. Retired from this chart in two steps; never pruned or deleted by Argo CD.
+    argocd.argoproj.io/sync-options: Prune=false,Delete=false
 spec:
   client:
     tls:

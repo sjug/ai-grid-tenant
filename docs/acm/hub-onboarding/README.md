@@ -241,3 +241,9 @@ flowchart TD
   with the `ai-grid/platform-namespaces` label, label `local-cluster` with
   `ai-grid/platform-namespaces=true`: the rhoai chart otherwise starts creating
   `openshift-operators-redhat`, which the platform already owns there.
+- The fleet dashboards have their own Perses names: `dashboard-0-ai-grid-fleet-cluster-admin`
+  ("Fleet clusters") and `dashboard-1-ai-grid-fleet-models-admin` ("Fleet models"), querying the
+  `ai-grid-acm-prometheus` datasource through ACM's authenticated query proxy. RHOAI owns
+  `cluster-prometheus-datasource`, `dashboard-0-cluster-admin` and `dashboard-1-model-admin`; this
+  revision still declares them, marked `Prune=false,Delete=false`, and a later revision hands them back.
+  Run a full sync of ai-grid-o11y at this revision before upgrading past it. Update bookmarks to the new tabs.
