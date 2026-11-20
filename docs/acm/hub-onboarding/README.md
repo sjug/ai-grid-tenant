@@ -244,6 +244,22 @@ flowchart TD
 - The fleet dashboards have their own Perses names: `dashboard-0-ai-grid-fleet-cluster-admin`
   ("Fleet clusters") and `dashboard-1-ai-grid-fleet-models-admin` ("Fleet models"), querying the
   `ai-grid-acm-prometheus` datasource through ACM's authenticated query proxy. RHOAI owns
-  `cluster-prometheus-datasource`, `dashboard-0-cluster-admin` and `dashboard-1-model-admin`; this
-  revision still declares them, marked `Prune=false,Delete=false`, and a later revision hands them back.
-  Run a full sync of ai-grid-o11y at this revision before upgrading past it. Update bookmarks to the new tabs.
+  `cluster-prometheus-datasource`, `dashboard-0-cluster-admin` and `dashboard-1-model-admin`, which
+  earlier revisions also declared. ai-grid-o11y hands them back in two revisions: the first adds the
+  fleet views and marks the three `Prune=false,Delete=false`; this one stops declaring them, and a
+  PostSync Job removes the Application's tracking annotation or instance label from them.
+  - A hub that synced the first revision needs nothing more. Find that revision with
+    `git log --diff-filter=A --format=%H -- charts/ai-grid-o11y/templates/datasource-fleet-metrics.yaml`.
+  - Otherwise the PreSync guard stops the sync with "sync the previous chart revision first", before
+    anything is pruned. In the root ApplicationSet's `ai-grid-o11y` element
+    (`bootstrap/applicationset.yaml` or `bootstrap/dedicated-hub/applicationset.yaml`) set
+    `targetRevision` of both sources to that revision and apply the root. Run a full sync of
+    ai-grid-o11y; a selective sync skips hooks, so don't use one during the handoff. Check the three
+    objects keep their UIDs and carry the protection
+    (`oc -n redhat-ods-monitoring get persesdatasource cluster-prometheus-datasource -o jsonpath='{.metadata.uid} {.metadata.annotations.argocd\.argoproj\.io/sync-options}'`,
+    likewise for the two dashboards) and that both fleet tabs show data, then set both sources back to `HEAD`.
+  - Roll back fleet content under the new names. Reverting the chart to a revision before the first
+    one would declare RHOAI's objects again.
+  - On a hub without RHOAI the three objects have no product owner (check their `ownerReferences`);
+    after the handoff they are unmanaged copies to delete once no bookmark uses them.
+  - Update bookmarks to the new tabs.

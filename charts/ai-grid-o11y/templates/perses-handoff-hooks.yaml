@@ -1,0 +1,279 @@
+# Hands cluster-prometheus-datasource, dashboard-0-cluster-admin and dashboard-1-model-admin back to RHOAI, which owns
+# them. The previous chart revision marked them Prune=false,Delete=false, so Argo CD skips their prune; PostSync then
+# removes this Application's tracking (the annotation, or the instance label under label tracking). PreSync stops the sync if one is still tracked
+# without that protection (the previous revision was skipped), before Argo CD could prune an object RHOAI owns.
+# The guard runs in openshift-gitops with read access only: redhat-ods-monitoring may not exist yet on a fresh install.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ai-grid-o11y-perses-handoff
+  namespace: openshift-gitops
+  annotations:
+    argocd.argoproj.io/hook: PreSync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+    argocd.argoproj.io/sync-wave: "-2"
+data:
+  handoff.sh: |
+    # handoff.sh guard|untrack
+    set -Eeuo pipefail
+    mode=$1 ns=redhat-ods-monitoring app=ai-grid-o11y
+    if ! cfg=$(oc -n openshift-gitops get configmap argocd-cm -o jsonpath='{.data.application\.resourceTrackingMethod}|{.data.application\.instanceLabelKey}'); then
+      echo "cannot read argocd-cm" >&2; exit 1
+    fi
+    method=${cfg%%|*} lkey=${cfg#*|}
+    method=${method:-annotation} lkey=${lkey:-app.kubernetes.io/instance}  # Argo CD 3 defaults
+    case $method in
+      annotation|annotation+label) by=annotation ;;
+      label) by=label ;;
+      *) echo "unsupported resource tracking method: $method" >&2; exit 1 ;;
+    esac
+    ljson=${lkey//./\\.} lpatch=${lkey//\//~1}
+    akey=/metadata/annotations/argocd.argoproj.io~1tracking-id
+    if ! apis=$(oc api-resources --api-group=perses.dev -o name); then
+      echo "cannot list the perses.dev API" >&2; exit 1
+    fi
+    [ -n "$apis" ] || { echo "perses.dev not installed: nothing to hand off"; exit 0; }
+    read_obj() { # kind name -> "annotation|label|sync-options", empty when absent
+      oc -n "$ns" get "$1.perses.dev" "$2" --ignore-not-found -o jsonpath="{.metadata.annotations.argocd\.argoproj\.io/tracking-id}|{.metadata.labels.$ljson}|{.metadata.annotations.argocd\.argoproj\.io/sync-options}"
+    }
+    for obj in PersesDatasource/cluster-prometheus-datasource PersesDashboard/dashboard-0-cluster-admin \
+               PersesDashboard/dashboard-1-model-admin; do
+      kind=${obj%/*} name=${obj#*/}
+      ours="$app:perses.dev/$kind:$ns/$name"
+      if [ "$by" = annotation ]; then path=$akey want=$ours; else path=/metadata/labels/$lpatch want=$app; fi
+      if [ "$mode" = untrack ] &&
+         oc -n "$ns" patch "$kind.perses.dev" "$name" --type=json \
+           -p '[{"op":"test","path":"'"$path"'","value":"'"$want"'"},{"op":"remove","path":"'"$path"'"}]' >/dev/null 2>&1; then
+        echo "$obj: removed $app's tracking ($by)"
+      fi
+      out=$(read_obj "$kind" "$name") || { echo "cannot read $obj" >&2; exit 1; }
+      [ -n "$out" ] || { echo "$obj: absent"; continue; }
+      ann=${out%%|*} rest=${out#*|}; lbl=${rest%%|*} opts=,${rest#*|},
+      if [ "$by" = annotation ]; then cur=$ann; else cur=$lbl; fi
+      if [ "$cur" != "$want" ]; then echo "$obj: not tracked by $app"; continue; fi
+      if [ "$mode" = untrack ]; then echo "$obj: still tracked by $app after the patch" >&2; exit 1; fi
+      case $opts in
+        *,Prune=false,*) case $opts in *,Delete=false,*) echo "$obj: protected"; continue;; esac;;
+      esac
+      echo "$obj is tracked by $app without Prune=false,Delete=false: sync the previous chart revision first" >&2
+      exit 1
+    done
+---
+# Guard identity (PreSync): read only.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: ai-grid-o11y-perses-guard
+  namespace: openshift-gitops
+  annotations:
+    argocd.argoproj.io/hook: PreSync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+    argocd.argoproj.io/sync-wave: "-2"
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: ai-grid-o11y-perses-guard
+  annotations:
+    argocd.argoproj.io/hook: PreSync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+    argocd.argoproj.io/sync-wave: "-2"
+rules:
+  - apiGroups: [perses.dev]
+    resources: [persesdatasources]
+    resourceNames: [cluster-prometheus-datasource]
+    verbs: [get]
+  - apiGroups: [perses.dev]
+    resources: [persesdashboards]
+    resourceNames: [dashboard-0-cluster-admin, dashboard-1-model-admin]
+    verbs: [get]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: ai-grid-o11y-perses-guard
+  annotations:
+    argocd.argoproj.io/hook: PreSync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+    argocd.argoproj.io/sync-wave: "-2"
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: ai-grid-o11y-perses-guard
+subjects:
+  - kind: ServiceAccount
+    name: ai-grid-o11y-perses-guard
+    namespace: openshift-gitops
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: ai-grid-o11y-perses-guard
+  namespace: openshift-gitops
+  annotations:
+    argocd.argoproj.io/hook: PreSync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+    argocd.argoproj.io/sync-wave: "-2"
+rules:
+  - apiGroups: [""]
+    resources: [configmaps]
+    resourceNames: [argocd-cm]
+    verbs: [get]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: ai-grid-o11y-perses-guard
+  namespace: openshift-gitops
+  annotations:
+    argocd.argoproj.io/hook: PreSync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+    argocd.argoproj.io/sync-wave: "-2"
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: ai-grid-o11y-perses-guard
+subjects:
+  - kind: ServiceAccount
+    name: ai-grid-o11y-perses-guard
+    namespace: openshift-gitops
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: ai-grid-o11y-perses-handoff-guard
+  namespace: openshift-gitops
+  annotations:
+    argocd.argoproj.io/hook: PreSync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+spec:
+  backoffLimit: 0
+  template:
+    spec:
+      serviceAccountName: ai-grid-o11y-perses-guard
+      restartPolicy: Never
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: handoff
+          image: registry.redhat.io/openshift4/ose-cli@sha256:75bd612f3d2b4dbddcbd7a48e12b5cb4d36e4a2683e7f48209e40596e0fbfc30
+          command: [/bin/bash, /scripts/handoff.sh, guard]
+          env:
+            - {name: HOME, value: /tmp}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+          resources:
+            requests: {cpu: 10m, memory: 128Mi}
+            limits: {memory: 256Mi}
+          volumeMounts:
+            - {name: scripts, mountPath: /scripts, readOnly: true}
+            - {name: tmp, mountPath: /tmp}
+      volumes:
+        - name: scripts
+          configMap: {name: ai-grid-o11y-perses-handoff}
+        - name: tmp
+          emptyDir: {}
+---
+# Untrack identity (ordinary resources, after the namespace exists): patch only the three objects in
+# redhat-ods-monitoring.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: ai-grid-o11y-perses-untrack
+  namespace: openshift-gitops
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: ai-grid-o11y-perses-untrack
+  namespace: redhat-ods-monitoring
+rules:
+  - apiGroups: [perses.dev]
+    resources: [persesdatasources]
+    resourceNames: [cluster-prometheus-datasource]
+    verbs: [get, patch]
+  - apiGroups: [perses.dev]
+    resources: [persesdashboards]
+    resourceNames: [dashboard-0-cluster-admin, dashboard-1-model-admin]
+    verbs: [get, patch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: ai-grid-o11y-perses-untrack
+  namespace: redhat-ods-monitoring
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: ai-grid-o11y-perses-untrack
+subjects:
+  - kind: ServiceAccount
+    name: ai-grid-o11y-perses-untrack
+    namespace: openshift-gitops
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: ai-grid-o11y-perses-untrack
+  namespace: openshift-gitops
+rules:
+  - apiGroups: [""]
+    resources: [configmaps]
+    resourceNames: [argocd-cm]
+    verbs: [get]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: ai-grid-o11y-perses-untrack
+  namespace: openshift-gitops
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: ai-grid-o11y-perses-untrack
+subjects:
+  - kind: ServiceAccount
+    name: ai-grid-o11y-perses-untrack
+    namespace: openshift-gitops
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: ai-grid-o11y-perses-handoff-untrack
+  namespace: openshift-gitops
+  annotations:
+    argocd.argoproj.io/hook: PostSync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+spec:
+  backoffLimit: 0
+  template:
+    spec:
+      serviceAccountName: ai-grid-o11y-perses-untrack
+      restartPolicy: Never
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: handoff
+          image: registry.redhat.io/openshift4/ose-cli@sha256:75bd612f3d2b4dbddcbd7a48e12b5cb4d36e4a2683e7f48209e40596e0fbfc30
+          command: [/bin/bash, /scripts/handoff.sh, untrack]
+          env:
+            - {name: HOME, value: /tmp}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+          resources:
+            requests: {cpu: 10m, memory: 128Mi}
+            limits: {memory: 256Mi}
+          volumeMounts:
+            - {name: scripts, mountPath: /scripts, readOnly: true}
+            - {name: tmp, mountPath: /tmp}
+      volumes:
+        - name: scripts
+          configMap: {name: ai-grid-o11y-perses-handoff}
+        - name: tmp
+          emptyDir: {}
