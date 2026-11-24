@@ -29,6 +29,7 @@ spec:
           namespaceSelector:
             include:
               - kuadrant-system
+            terminatingInclusion: Default
           object-templates-raw: |
             {{hub- $homes := (lookup "cluster.open-cluster-management.io/v1" "ManagedCluster" "" "" "ai-grid/external-services=true").items hub}}
             {{hub- $homeCA := "" hub}}
@@ -122,6 +123,7 @@ spec:
           namespaceSelector:
             include:
               - models-as-a-service
+            terminatingInclusion: Default
           object-templates:
             - complianceType: musthave
               objectDefinition:
@@ -145,6 +147,7 @@ spec:
           namespaceSelector:
             include:
               - ai-tenants
+            terminatingInclusion: Default
           object-templates:
             - complianceType: musthave
               objectDefinition:
@@ -181,6 +184,7 @@ spec:
           namespaceSelector:
             include:
               - models-as-a-service
+            terminatingInclusion: Default
           object-templates:
             - complianceType: musthave
               objectDefinition:
@@ -219,6 +223,7 @@ spec:
           namespaceSelector:
             include:
               - models-as-a-service
+            terminatingInclusion: Default
           object-templates:
             # Fake API Key for external model -> local Grid GW connection
             - complianceType: musthave

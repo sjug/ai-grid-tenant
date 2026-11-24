@@ -53,6 +53,7 @@ spec:
           namespaceSelector:
             matchLabels:
               grid.opendatahub.io/allowed: "true"
+            terminatingInclusion: Default
           object-templates:
             - complianceType: musthave
               objectDefinition:
@@ -174,6 +175,7 @@ spec:
           namespaceSelector:
             matchLabels:
               grid.opendatahub.io/allowed: "true"
+            terminatingInclusion: Default
           object-templates:
             - complianceType: musthave
               objectDefinition:
@@ -273,6 +275,7 @@ spec:
           namespaceSelector:
             matchLabels:
               grid.opendatahub.io/allowed: "true"
+            terminatingInclusion: Default
           object-templates:
             - complianceType: musthave
               objectDefinition:

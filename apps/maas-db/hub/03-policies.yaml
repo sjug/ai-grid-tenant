@@ -23,6 +23,7 @@ spec:
           namespaceSelector:
             include:
               - maas-db
+            terminatingInclusion: Default
           object-templates:
             - complianceType: musthave
               objectDefinition:
@@ -82,6 +83,7 @@ spec:
           namespaceSelector:
             include:
               - redhat-ai-gateway-infra
+            terminatingInclusion: Default
           object-templates:
             - complianceType: musthave
               objectDefinition:

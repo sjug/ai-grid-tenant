@@ -83,6 +83,7 @@ spec:
           namespaceSelector:
             include:
               - maas-db
+            terminatingInclusion: Default
           object-templates:
             - complianceType: musthave
               objectDefinition:
