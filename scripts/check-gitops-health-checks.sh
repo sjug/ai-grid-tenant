@@ -58,6 +58,8 @@ gateway.networking.k8s.io	GatewayClass
 grid.praxis.fast	GridNetwork
 grid.praxis.fast	InferenceProvider
 kuadrant.io	Kuadrant
+monitoring.rhobs	MonitoringStack
+opentelemetry.io	OpenTelemetryCollector
 operator.openshift.io	LeaderWorkerSetOperator
 EOF
 
@@ -93,6 +95,8 @@ sort -u "$configured_raw" > "$configured"
 # Application resource health). GridSite is intentionally omitted because site
 # discovery and enrollment can remain Pending independently of GitOps. The other
 # entries are declarative resources whose current CRDs expose no operand status.
+# MonitoringStack and OpenTelemetryCollector are RHOAI operands whose memory rhoai-monitoring-memory reports on:
+# the Application tracks the Policy, and their readiness is RHOAI Monitoring's to report.
 cat > "$allowlisted" <<'EOF'
 admissionregistration.k8s.io	ValidatingAdmissionPolicy
 admissionregistration.k8s.io	ValidatingAdmissionPolicyBinding
@@ -104,7 +108,9 @@ metallb.io	L2Advertisement
 metallb.io	MetalLB
 monitoring.coreos.com	PodMonitor
 monitoring.coreos.com	ServiceMonitor
+monitoring.rhobs	MonitoringStack
 monitoring.rhobs	ScrapeConfig
+opentelemetry.io	OpenTelemetryCollector
 policy.open-cluster-management.io	PlacementBinding
 policy.open-cluster-management.io	Policy
 submariner.io	Broker

@@ -231,6 +231,103 @@ The policy retains its RBAC and the Subscription's env var on deletion or desele
 During retirement, remove the compatibility ClusterRoleBinding and ClusterRole through
 GitOps. The leftover env var has no effect.
 
+## Monitoring memory headroom
+
+RHOAI's metrics collector and Prometheus are killed at their shipped memory limits on Grid sites
+([RHOAIENG-104114](https://redhat.atlassian.net/browse/RHOAIENG-104114) for the collector). The collector's
+`memory_limiter` is set to 4000 MiB while its container is limited to 256Mi, so the kernel kills it before the
+limiter refuses data. Prometheus replicas recorded OOMKilled exits on all three sites at the 512Mi limit; the
+2Gi limit leaves headroom for work such as WAL replay and compaction. Neither `DSCInitialization` nor
+`Monitoring` has a field for these resources.
+
+`set-monitoring-memory.sh` sets, on the two custom resources RHOAI's `Monitoring` controls:
+
+| Object | Memory request | Memory limit | Shipped |
+| --- | --- | --- | --- |
+| `OpenTelemetryCollector/data-science-collector` | 2Gi | 6Gi | 256Mi / 256Mi |
+| `MonitoringStack/data-science-monitoringstack` | 1Gi | 2Gi | 256Mi / 512Mi |
+
+The collector limit is above the limiter's hard limit, so the shipped limiter can act. CPU values, pipelines,
+replicas, retention and volumes are not touched. This adds 5 GiB of scheduled memory requests per site.
+
+RHOAI's observability module reconciles both objects to its own configuration, so the same patch adds
+`opendatahub.io/managed: "false"`: the module skips such an object when it deploys and when it garbage
+collects. The consequence is that the module no longer updates these two objects. Compare both with the
+product's render at every RHOAI payload change and at every change of `Monitoring` or of
+`DSCInitialization.spec.monitoring` (collector replicas, retention, storage, exporters), and carry over what
+changed.
+
+The write is a script and not an enforcing policy because ACM creates a named `musthave` object that is
+missing and retries a conflicting update on whatever object then has the name; an object created that way
+would be opted out of the module for good. The script only patches an existing object, with one JSON Patch
+that first tests the object's UID and resourceVersion, so the API server changes nothing unless that object
+is still as it was read. Those preconditions cover the object, not its `Monitoring`: the script reads the
+`Monitoring` before the patch and again afterwards, and reports success only if it is still the same one,
+still controls the object, and neither is terminating. It stops at the first object it cannot bring to the
+wanted state and read back, and when the object, or the namespace the `Monitoring` names, is no longer the
+one the run started with, or a write that the API server acknowledged is not in place afterwards. It sends a
+patch again only after the API server definitely rejected the previous one and the same object is at another
+resourceVersion; a patch without an answer is never repeated. It appends
+to `RECORD_FILE` what each object was before every write, ahead of the write, and then the outcome.
+
+The `rhoai-monitoring-memory` Policy only informs. NonCompliant for a site is not by itself a reason to
+patch: read the compliance message, then run `check` there. A template error also reports NonCompliant, and
+a site where the object is absent, foreign or terminating renders nothing and reports Compliant.
+
+Run it per site. `MONITORING_UID` binds the run to the site that is meant: read it there first, and every
+action refuses a cluster whose `Monitoring` has another UID.
+
+```sh
+export KUBECONFIG=<site kubeconfig>
+export MONITORING_UID="$(kubectl get monitorings.services.platform.opendatahub.io default-monitoring -o jsonpath='{.metadata.uid}')"
+apps/rhoai-prerequisites/set-monitoring-memory.sh check
+READY_FILE=<site>.ready apps/rhoai-prerequisites/set-monitoring-memory.sh watch 2400 > <site>.watch.log 2>&1 &
+# wait for <site>.ready: both streams have delivered the objects' current state
+RECORD_FILE=<site>.record.jsonl apps/rhoai-prerequisites/set-monitoring-memory.sh apply
+```
+
+`watch` lists each object and follows it from that list's resourceVersion; its `READY` line gives both UIDs
+and baseline versions. It prints every event with UID, resourceVersion and values, and fails at once on a
+change away from the wanted values after they were reached (`REVERTED`), a deleted or replaced object, a
+watch error or a stream that ends early; at the end of its window it fails if either object never showed the
+wanted values. Keep it running through the whole observation below and check its exit status. The
+resourceVersion at which the API server acknowledged each patch, which `apply` prints and records, appears
+in its log as the event that brings the wanted values.
+
+Go on to the next site only when, on this one:
+
+- `apply` exited 0 and the watch log shows the patch for each object that was changed;
+- both objects carry the annotation and the values, and keep their CPU values and owner reference;
+- the collector and Prometheus StatefulSets rolled, their pods are Ready with the new values, Prometheus kept
+  its volumes, and no container has a new `OOMKilled` exit;
+- `Monitoring` is Ready and the watch has run for five more minutes without ending.
+
+A failed `apply`, a watch that ended, or a revert on a site that was already done stops the remaining sites.
+Accept the change only when every watch ended with status 0 after its window and a target that only the
+collector delivers has successful samples that keep arriving, checked 10 and 30 minutes after the last site
+where the site's metrics are queried (on a Grid with ACM observability: the hub's query endpoint, by site
+label). Ready pods and memory readings alone also pass while samples are dropped.
+
+Run the local checks with Helm and PyYAML:
+
+```sh
+python3 apps/rhoai-prerequisites/tests/monitoring-memory-policy-test.py
+apps/rhoai-prerequisites/tests/monitoring-memory-script-test.sh
+```
+
+To roll back a site, use its record. It has a `before` line for every write that was attempted, written ahead
+of the write, and an `outcome` line once the object was settled. Only the outcome `patched by this run` says
+that the API server acknowledged this run's write. An attempt whose outcome is `unresolved`, `as wanted after
+a patch without an answer` (the state was verified, the writer was not established) or `as wanted, written by
+another writer` needs a look at the live object and at who else writes it before anything is undone. For each
+object the run changed, check that the live object still
+has the recorded UID, then put back what the `before` line holds: the recorded memory request and limit, and
+the annotation exactly as it was, removed if it was not present, otherwise with its recorded value. Without
+the annotation the module restores its own values; confirm that and that the StatefulSet rolls and recovers.
+Leave an object alone that the run did not change. The Policy then reports the site NonCompliant until
+`16-monitoring-memory-policy.yaml` is removed through GitOps. Retire once the product sizes these workloads
+or exposes their resources; restoring the shipped limits before then restarts the kills.
+
 ## Shared Limitador Redis
 
 `apps/limitador-redis` owns the Redis instance and its local Limitador storage

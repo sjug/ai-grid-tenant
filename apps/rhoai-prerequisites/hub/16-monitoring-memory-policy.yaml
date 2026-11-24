@@ -1,0 +1,128 @@
+# Reports whether RHOAI's metrics collector and Prometheus have the memory headroom that
+# apps/rhoai-prerequisites/set-monitoring-memory.sh gives them (RHOAIENG-104114: the collector is limited to
+# 256Mi under a 4000 MiB memory_limiter, Prometheus to 512Mi, and both are OOM-killed).
+# Neither DSCInitialization nor Monitoring has a field for these resources, and RHOAI's observability module
+# reconciles both objects to its own configuration unless they carry opendatahub.io/managed: "false".
+# This policy only informs. ACM would create a missing named object and retries a conflicting update on whatever
+# object then has the name, so the write is left to the script, which patches an existing object under UID and
+# resourceVersion preconditions. NonCompliant is a reason to read the compliance message and to run the
+# script's check on that site, not by itself a reason to patch: a template error reports NonCompliant too, and
+# an absent, foreign or terminating object renders nothing and reports Compliant. See ../README.md.
+apiVersion: cluster.open-cluster-management.io/v1beta1
+kind: Placement
+metadata:
+  name: rhoai-monitoring-memory
+  namespace: rhoai-prerequisites
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+spec:
+  clusterSets:
+    - global
+  # Match the RHOAI ApplicationSet's Grid membership, including an enabled hub.
+  predicates:
+    - requiredClusterSelector:
+        labelSelector:
+          matchLabels:
+            ai-grid/enabled: "true"
+          matchExpressions:
+            - key: ai-grid/role
+              operator: In
+              values: [ingress, inference, combined]
+  tolerations:
+    - key: cluster.open-cluster-management.io/unreachable
+      operator: Exists
+    - key: cluster.open-cluster-management.io/unavailable
+      operator: Exists
+---
+apiVersion: policy.open-cluster-management.io/v1
+kind: Policy
+metadata:
+  name: rhoai-monitoring-memory
+  namespace: rhoai-prerequisites
+  annotations:
+    argocd.argoproj.io/sync-wave: "4"
+spec:
+  disabled: false
+  # Inform only: see the header.
+  remediationAction: inform
+  policy-templates:
+    - objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1
+        kind: ConfigurationPolicy
+        metadata:
+          name: rhoai-collector-memory
+        spec:
+          remediationAction: inform
+          severity: medium
+          pruneObjectBehavior: None
+          object-templates-raw: |
+            {{- $objects := list }}
+            {{- $monitoring := lookup "services.platform.opendatahub.io/v1alpha1" "Monitoring" "" "default-monitoring" }}
+            {{- $namespace := dig "spec" "namespace" "" $monitoring }}
+            {{- $live := dict }}
+            {{- if and $namespace (not (dig "metadata" "deletionTimestamp" "" $monitoring)) }}
+            {{- $live = lookup "opentelemetry.io/v1beta1" "OpenTelemetryCollector" $namespace "data-science-collector" }}
+            {{- end }}
+            {{- /* Report only on the object this Monitoring controls; an absent, foreign or terminating one is not ours to size. */ -}}
+            {{- $controlled := false }}
+            {{- range $owner := dig "metadata" "ownerReferences" (list) $live }}
+            {{- if and (eq (dig "kind" "" $owner) "Monitoring") (eq (dig "controller" false $owner) true) (eq (dig "uid" "" $owner) (dig "metadata" "uid" "-" $monitoring)) }}
+            {{- $controlled = true }}
+            {{- end }}
+            {{- end }}
+            {{- if and $controlled (not (dig "metadata" "deletionTimestamp" "" $live)) }}
+            {{- /* Keep these values equal to the targets in ../set-monitoring-memory.sh. */ -}}
+            {{- $resources := dict "requests" (dict "memory" "2Gi") "limits" (dict "memory" "6Gi") }}
+            {{- $metadata := dict "name" "data-science-collector" "namespace" $namespace "annotations" (dict "opendatahub.io/managed" "false") }}
+            {{- $object := dict "apiVersion" "opentelemetry.io/v1beta1" "kind" "OpenTelemetryCollector" "metadata" $metadata "spec" (dict "resources" $resources) }}
+            {{- $objects = append $objects (dict "complianceType" "musthave" "objectDefinition" $object) }}
+            {{- end }}
+            {{ $objects | toJson }}
+    - objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1
+        kind: ConfigurationPolicy
+        metadata:
+          name: rhoai-prometheus-memory
+        spec:
+          remediationAction: inform
+          severity: medium
+          pruneObjectBehavior: None
+          object-templates-raw: |
+            {{- $objects := list }}
+            {{- $monitoring := lookup "services.platform.opendatahub.io/v1alpha1" "Monitoring" "" "default-monitoring" }}
+            {{- $namespace := dig "spec" "namespace" "" $monitoring }}
+            {{- $live := dict }}
+            {{- if and $namespace (not (dig "metadata" "deletionTimestamp" "" $monitoring)) }}
+            {{- $live = lookup "monitoring.rhobs/v1alpha1" "MonitoringStack" $namespace "data-science-monitoringstack" }}
+            {{- end }}
+            {{- /* Report only on the object this Monitoring controls; an absent, foreign or terminating one is not ours to size. */ -}}
+            {{- $controlled := false }}
+            {{- range $owner := dig "metadata" "ownerReferences" (list) $live }}
+            {{- if and (eq (dig "kind" "" $owner) "Monitoring") (eq (dig "controller" false $owner) true) (eq (dig "uid" "" $owner) (dig "metadata" "uid" "-" $monitoring)) }}
+            {{- $controlled = true }}
+            {{- end }}
+            {{- end }}
+            {{- if and $controlled (not (dig "metadata" "deletionTimestamp" "" $live)) }}
+            {{- /* Keep these values equal to the targets in ../set-monitoring-memory.sh. */ -}}
+            {{- $resources := dict "requests" (dict "memory" "1Gi") "limits" (dict "memory" "2Gi") }}
+            {{- $metadata := dict "name" "data-science-monitoringstack" "namespace" $namespace "annotations" (dict "opendatahub.io/managed" "false") }}
+            {{- $object := dict "apiVersion" "monitoring.rhobs/v1alpha1" "kind" "MonitoringStack" "metadata" $metadata "spec" (dict "resources" $resources) }}
+            {{- $objects = append $objects (dict "complianceType" "musthave" "objectDefinition" $object) }}
+            {{- end }}
+            {{ $objects | toJson }}
+---
+apiVersion: policy.open-cluster-management.io/v1
+kind: PlacementBinding
+metadata:
+  name: rhoai-monitoring-memory
+  namespace: rhoai-prerequisites
+  annotations:
+    argocd.argoproj.io/sync-wave: "3"
+placementRef:
+  apiGroup: cluster.open-cluster-management.io
+  kind: Placement
+  name: rhoai-monitoring-memory
+subjects:
+  - apiGroup: policy.open-cluster-management.io
+    kind: Policy
+    name: rhoai-monitoring-memory
