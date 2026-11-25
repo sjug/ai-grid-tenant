@@ -334,6 +334,41 @@ Leave an object alone that the run did not change. The Policy then reports the s
 `16-monitoring-memory-policy.yaml` is removed through GitOps. Retire once the product sizes these workloads
 or exposes their resources; restoring the shipped limits before then restarts the kills.
 
+## KServe module operator memory
+
+RHOAI's KServe module operator (`redhat-ods-applications/kserve-module-controller-manager`, deployed by the
+`Platform`) has been observed to be OOM-killed at its shipped 1Gi memory limit during startup on an ACM hub, leaving
+the KServe controllers on previous images ([RHOAIENG-103335](https://redhat.atlassian.net/browse/RHOAIENG-103335)).
+The operator watches Secrets, ConfigMaps and other kinds cluster-wide.
+
+`set-kserve-module-memory.sh` raises only the `manager` container's memory limit to 2Gi; the CPU values and the
+memory request stay as shipped. The `Platform` has no field for this, but when it renders the Deployment it keeps a
+live container resource value (the deploy framework's `MergeDeployments`) unless the Deployment is annotated
+`opendatahub.io/managed: "true"`, so the script refuses such a Deployment and needs no opt-out. A payload that ships
+a different limit does not reach a Deployment patched this way: compare with the product's render at every RHOAI
+payload change.
+
+The patch is one JSON Patch that tests the Deployment's UID and resourceVersion, the container's name at its index
+and the old limit, so the API server changes nothing unless the Deployment is still as it was read. The script
+records the Deployment's UID, resourceVersion and previous memory limit in `RECORD_FILE` before the write, then waits
+until the Deployment has rolled out with the new limit on the `manager` container and every pod of it is new and
+Ready, and then for `STABLE` seconds (default 180) requires no restart, no replacement and the limit still in place.
+Every read and pause while waiting is bounded by the time left. It never repeats a patch whose outcome is unknown.
+
+The `rhoai-kserve-module-memory` Policy only informs, on the hub only (ManagedCluster label `local-cluster: "true"`).
+It reports NonCompliant while the Deployment controlled by the `Platform` lacks the 2Gi limit, and renders nothing when
+the Deployment is absent, foreign or terminating.
+
+```sh
+export KUBECONFIG=<hub kubeconfig>
+export PLATFORM_UID="$(kubectl get platforms.v1alpha2.config.opendatahub.io default -o jsonpath='{.metadata.uid}')"
+apps/rhoai-prerequisites/set-kserve-module-memory.sh check
+RECORD_FILE=hub.kserve-module.record.jsonl apps/rhoai-prerequisites/set-kserve-module-memory.sh apply
+```
+
+Afterwards the hub's `kserve-controller-manager` and `llmisvc-controller-manager` should roll to the payload's
+images, the `Kserve` resource should be Ready at its generation, and the policy should report Compliant.
+
 ## Shared Limitador Redis
 
 `apps/limitador-redis` owns the Redis instance and its local Limitador storage

@@ -1,0 +1,90 @@
+# Reports whether RHOAI's KServe module operator on the hub has the memory limit that
+# apps/rhoai-prerequisites/set-kserve-module-memory.sh gives it (RHOAIENG-103335: the operator has been observed to be
+# OOM-killed at its shipped 1Gi limit during startup on an ACM hub, leaving the KServe controllers on previous images).
+# The Platform keeps a live container resource value when it renders the Deployment, so the raised limit holds; the
+# Platform has no field for it. This policy only informs: ACM would create a missing named object, so the write is left
+# to the script, which patches the existing Deployment under UID and resourceVersion preconditions. An absent, foreign or
+# terminating Deployment renders nothing and reports Compliant. See ../README.md.
+apiVersion: cluster.open-cluster-management.io/v1beta1
+kind: Placement
+metadata:
+  name: rhoai-kserve-module-memory
+  namespace: rhoai-prerequisites
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+spec:
+  clusterSets:
+    - global
+  # Select the enabled local cluster only.
+  predicates:
+    - requiredClusterSelector:
+        labelSelector:
+          matchLabels:
+            ai-grid/enabled: "true"
+            local-cluster: "true"
+  tolerations:
+    - key: cluster.open-cluster-management.io/unreachable
+      operator: Exists
+    - key: cluster.open-cluster-management.io/unavailable
+      operator: Exists
+---
+apiVersion: policy.open-cluster-management.io/v1
+kind: Policy
+metadata:
+  name: rhoai-kserve-module-memory
+  namespace: rhoai-prerequisites
+  annotations:
+    argocd.argoproj.io/sync-wave: "4"
+spec:
+  disabled: false
+  # Inform only: see the header.
+  remediationAction: inform
+  policy-templates:
+    - objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1
+        kind: ConfigurationPolicy
+        metadata:
+          name: rhoai-kserve-module-memory
+        spec:
+          remediationAction: inform
+          severity: medium
+          pruneObjectBehavior: None
+          object-templates-raw: |
+            {{- $objects := list }}
+            {{- $platform := lookup "config.opendatahub.io/v1alpha2" "Platform" "" "default" }}
+            {{- $live := dict }}
+            {{- if not (dig "metadata" "deletionTimestamp" "" $platform) }}
+            {{- $live = lookup "apps/v1" "Deployment" "redhat-ods-applications" "kserve-module-controller-manager" }}
+            {{- end }}
+            {{- /* Report only on the Deployment this Platform controls; an absent, foreign or terminating one is not ours to size. */ -}}
+            {{- $controlled := false }}
+            {{- range $owner := dig "metadata" "ownerReferences" (list) $live }}
+            {{- if and (eq (dig "kind" "" $owner) "Platform") (eq (dig "controller" false $owner) true) (eq (dig "uid" "" $owner) (dig "metadata" "uid" "-" $platform)) }}
+            {{- $controlled = true }}
+            {{- end }}
+            {{- end }}
+            {{- if and $controlled (not (dig "metadata" "deletionTimestamp" "" $live)) }}
+            {{- /* Keep this value equal to the target in ../set-kserve-module-memory.sh. */ -}}
+            {{- $container := dict "name" "manager" "resources" (dict "limits" (dict "memory" "2Gi")) }}
+            {{- $template := dict "spec" (dict "containers" (list $container)) }}
+            {{- $metadata := dict "name" "kserve-module-controller-manager" "namespace" "redhat-ods-applications" }}
+            {{- $object := dict "apiVersion" "apps/v1" "kind" "Deployment" "metadata" $metadata "spec" (dict "template" $template) }}
+            {{- $objects = append $objects (dict "complianceType" "musthave" "objectDefinition" $object) }}
+            {{- end }}
+            {{ $objects | toJson }}
+---
+apiVersion: policy.open-cluster-management.io/v1
+kind: PlacementBinding
+metadata:
+  name: rhoai-kserve-module-memory
+  namespace: rhoai-prerequisites
+  annotations:
+    argocd.argoproj.io/sync-wave: "3"
+placementRef:
+  apiGroup: cluster.open-cluster-management.io
+  kind: Placement
+  name: rhoai-kserve-module-memory
+subjects:
+  - apiGroup: policy.open-cluster-management.io
+    kind: Policy
+    name: rhoai-kserve-module-memory
