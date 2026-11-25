@@ -26,6 +26,12 @@ grid-bootstrap image from the same registry. Other managed clusters get nothing:
   scrape pool keeps targets, preventing duplicate collection on the hub.
   Removing the registration policy does not withdraw its addon tuple; that
   requires a separate migration preserving the other configs.
+  The policy also sets `installStrategy.type: Placements` to enable add-on
+  installation on clusters selected by the global placement. If this policy
+  creates the add-on before ACM does, omitting the type defaults it to `Manual`
+  and prevents automatic rollout, including Cluster Observability Operator
+  installation on the hub. The additive `musthave` registration preserves ACM's
+  default configuration references and other placement entries.
 - temporary cert-manager permissions for the OpenTelemetry operator on enabled Grid sites
   with role `ingress`, `inference` or `combined`, including an enabled hub, and a one-time
   OTel restart once cert-manager and those permissions are usable.

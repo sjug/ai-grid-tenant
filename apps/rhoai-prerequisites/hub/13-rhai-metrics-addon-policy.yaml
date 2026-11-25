@@ -26,7 +26,9 @@ metadata:
   name: rhoai-metrics-addon
   namespace: rhoai-prerequisites
   annotations:
-    argocd.argoproj.io/sync-wave: "6"
+    # Registration is independent of image-mirror compliance; apply it alongside
+    # the other wave-4 policies so mirror failures cannot block metrics delivery.
+    argocd.argoproj.io/sync-wave: "4"
 spec:
   disabled: false
   remediationAction: enforce
@@ -78,7 +80,7 @@ metadata:
   name: rhoai-metrics-addon
   namespace: rhoai-prerequisites
   annotations:
-    argocd.argoproj.io/sync-wave: "6"
+    argocd.argoproj.io/sync-wave: "3"
 placementRef:
   apiGroup: cluster.open-cluster-management.io
   kind: Placement

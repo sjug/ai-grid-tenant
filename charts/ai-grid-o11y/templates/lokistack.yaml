@@ -14,6 +14,7 @@ spec:
         streamLabels:
           resourceAttributes:
           - name: service.name
+          - name: tenant_name
           - name: subscription
           - name: organization_id
           - name: user_id
